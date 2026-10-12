@@ -16,19 +16,24 @@ simulator.**
 ## Contents
 
 1. [Overview](#overview)
-2. [Key findings](#key-findings)
-3. [Dataset & methodology](#dataset--methodology)
-4. [Packages used](#packages-used)
-5. [Project structure](#project-structure)
-6. [Installation](#installation)
-7. [Running the project](#running-the-project)
-8. [Dashboard & API](#dashboard--api)
-9. [Python usage example](#python-usage-example)
-10. [Testing](#testing)
-11. [Limitations & responsible use](#limitations--responsible-use)
-12. [Contributing](#contributing)
-13. [License & data acknowledgement](#license--data-acknowledgement)
-14. [Citation](#citation)
+2. [Research background](#research-background)
+3. [Key findings](#key-findings)
+4. [Dataset & methodology](#dataset--methodology)
+5. [Packages used](#packages-used)
+6. [Project structure](#project-structure)
+7. [Installation](#installation)
+8. [Running the project](#running-the-project)
+9. [Dashboard & API](#dashboard--api)
+10. [Architecture & design decisions](#architecture--design-decisions)
+11. [System verification](#system-verification)
+12. [Python usage example](#python-usage-example)
+13. [Testing](#testing)
+14. [Research outputs](#research-outputs)
+15. [Troubleshooting](#troubleshooting)
+16. [Limitations & responsible use](#limitations--responsible-use)
+17. [Contributing](#contributing)
+18. [License & data acknowledgement](#license--data-acknowledgement)
+19. [Citation](#citation)
 
 ---
 
@@ -51,6 +56,27 @@ disputes — is costly and unevenly distributed across UK workplaces. This proje
 
 The full pipeline is deterministic (`random_state = 42`) and verified by
 **31 pytest tests**, including a 19-point system-test plan (ST1–ST19).
+
+---
+
+## Research background
+
+The project answers three research questions drawn from the operational-risk
+and employee-relations literature:
+
+| # | Research question |
+|---|---|
+| **RQ1** | Which organisational, HR and employee-relations predictors significantly influence operational risk levels (turnover, absenteeism, grievances, industrial disputes) in UK workplaces? |
+| **RQ2** | How do different configurations of HR management practices and employee-relations strategies relate to the predictive probability of high operational risk across organisational sizes and sectors? |
+| **RQ3** | To what extent can machine-learning models predict risk levels from pre-existing characteristics, and how can predictions be effectively visualised in an interactive dashboard for decision-makers? |
+
+These map to three objectives and their delivered artefacts:
+
+| Objective | Delivered |
+|---|---|
+| **RO1** — identify key risk determinants | correlation analysis, MDI + SHAP importance rankings, factor analysis of HR practices |
+| **RO2** — develop predictive models | 5 algorithms + 5 imbalance-handling variants, systematic comparison on balanced accuracy |
+| **RO3** — interactive decision-support dashboard | Flask app: prediction with live explanations, data explorer, model insights, what-if simulation |
 
 ---
 
@@ -108,6 +134,42 @@ Per-class recall (logistic regression): Low 64.9 % · Medium 66.1 % · High 33.3
 - **Explainability:** global SHAP importance (tree/linear explainers) and a
   **live local explanation per prediction** — exact linear SHAP computed
   server-side for the exact input, aggregated back to the original features.
+
+---
+
+## Architecture & design decisions
+
+```
+WERS .tab ──► 01 prepare ──► merged CSV ──► 03 features ──► 04 train ──► Pipeline(.pkl)
+                  │                                              │            │
+                  └── risk score/category (target)               │            ▼
+                                                                 │      Flask REST API
+                        05 evaluate ──► metrics/CM/ROC           │       ├── /api/predict  (+ live SHAP)
+                        06 SHAP      ──► global importance       ▼       ├── /api/whatif
+                                       local fallback JSON   metadata   └── /api/insights, /api/features, /api/data/*
+```
+
+- **Train/serve parity.** Each model is a single scikit-learn `Pipeline`
+  (`prep` → `clf`): one-hot encoding, median/`MISSING` imputation and
+  classification travel together, so the API can never score data differently
+  from how it was trained.
+- **Leakage is guarded twice** — excluded in `04_model_training.py` and
+  asserted by system test ST3 against `model_metadata.json`.
+- **Fail-safe explainability.** Local SHAP (`contribution_j = coef_j ·
+  (x_j − E[x_j])`, background expectation cached from the real data) is
+  computed per request but never gates it: if explanation fails, the
+  prediction response is returned without it (regression-tested).
+- **Strict, structured API.** Pydantic schemas enforce types/ranges; every
+  error uses a machine-readable code (`MISSING_FIELD`, `OUT_OF_RANGE`, …)
+  with HTTP status, `X-Request-ID` tracing and a per-IP rate limiter.
+- **What-if integrity.** Both blocks pass through the *same* validator and
+  model as `/api/predict`; validation runs client- and server-side, and
+  failures are tagged `baseline`/`scenario` so comparisons are auditable.
+- **Honest decision support.** The what-if UI shows deltas and an explicit
+  "associations, not causal effects" disclaimer; the rare-class bound is
+  disclosed rather than hidden.
+- **Determinism.** `random_state = 42` end-to-end — every committed number
+  and figure is reproducible from the committed code.
 
 ---
 
@@ -285,6 +347,49 @@ Ten fields are required; everything else is optional and safely imputed
 (numeric → median, categorical → `"MISSING"`) inside the scikit-learn pipeline.
 Every response carries an `X-Request-ID` for traceability.
 
+### Example requests
+
+```bash
+curl -X POST http://localhost:5000/api/predict \
+  -H "Content-Type: application/json" \
+  -d '{"sector": 1, "org_size_category_3": 2, "multinational": 2,
+       "union_coverage_pct": 30, "collective_bargaining": 2,
+       "performance_appraisal_pct": 3, "jcc_exists": 2,
+       "information_sharing_score": 3, "pct_part_time": 20, "pct_temporary": 5}'
+```
+
+```json
+{
+  "risk_level": "Medium",
+  "probability": 0.7365,
+  "probabilities": {"Low": 0.2635, "Medium": 0.7365, "High": 0.0},
+  "local_explanation": {
+    "model": "LogisticRegression",
+    "class_explained": "Medium",
+    "base_value": 2.30318,
+    "output": 7.89901,
+    "contributions": [
+      {"feature": "performance_appraisal_pct", "shap": 0.84451, "value": "3"},
+      {"feature": "collective_bargaining", "shap": 0.76788, "value": "2"}
+    ]
+  }
+}
+```
+
+```bash
+curl -X POST http://localhost:5000/api/whatif \
+  -H "Content-Type: application/json" \
+  -d '{"baseline": { ...10 required fields... },
+       "scenario": { ...same fields, jcc_exists: 1, appraisal: 5... }}'
+# -> {"baseline": {...}, "scenario": {...}} — same contract as /api/predict
+```
+
+### Screenshots
+
+| Risk prediction + live local SHAP | What-if simulator |
+|---|---|
+| ![Local SHAP](research/figures/dashboard_predict_local_shap.png) | ![What-if](research/figures/dashboard_whatif_simulator.png) |
+
 ---
 
 ## Python usage example
@@ -328,6 +433,54 @@ The suite covers the predictor wrapper, the Pydantic validation contract
 alias, the rate limiter, the what-if block protocol, and the live local-SHAP
 response contract (including fail-safety: a broken explainer must never break
 a prediction).
+
+---
+
+## System verification
+
+Beyond unit tests, a 19-point system-test plan (ST1–ST19) is executed against
+the deployed configuration (`python scripts/research/01_system_tests.py`) —
+**19/19 passing** as of the latest run:
+
+| Group | Tests | Verifies |
+|---|---|---|
+| Data integrity | ST1–ST3 | dataset dimensions 6,635 × 52, class counts, 11 leakage exclusions |
+| Model | ST4–ST5 | best model loads (logreg, 36 features); probabilities sum to 1 |
+| Validation contract | ST6–ST13 | all 400-level codes: missing/empty/type/range/extra/null/malformed |
+| Resilience | ST14–ST16 | 422 model failure, 500 internal error, 429 rate limit + `Retry-After` |
+| Integration | ST17–ST19 | endpoint aliases, what-if baseline/scenario, NaN-free strict JSON |
+
+A browser-level Playwright run additionally verified: all forms auto-build
+(20 inputs each), client-side validation blocks bad input with zero network
+calls, the what-if delta chart/diff render, the local-SHAP chart draws 12
+non-zero bars, and no JavaScript errors occur.
+
+---
+
+## Research outputs
+
+Chapter-mapped dissertation artefacts (figures 4.1–4.4 and 5.1–5.7, tables
+3.2/4.x/5.1–5.13, environment table, system-test report) live in
+[`research/`](research/README.md) — its README is a full
+chapter → artifact map with the executed numbers. Regenerate everything
+deterministically with:
+
+```bash
+python scripts/research/00_thesis_outputs.py   # thesis figures + tables
+python scripts/research/01_system_tests.py     # ST1-ST19 evidence
+```
+
+---
+
+## Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| `WARNING: model not trained yet` / dashboard starts but predicts fail | run `python scripts/01_data_preparation.py` then `python scripts/04_model_training.py` (the `.pkl` files are not committed) |
+| `OSError: [Errno 98]` / address already in use | another process holds port 5000 — kill it or change the port in `dashboard/app.py` |
+| Charts render empty / no gauge | the frontend loads Plotly.js from a CDN — check internet access, or self-host the bundle |
+| `ModuleNotFoundError` in scripts | activate the environment installed via `pip install -r requirements.txt` |
+| Numbers differ from this README | you are likely on different package versions — compare with the verified environment table above |
 
 ---
 
