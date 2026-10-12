@@ -4,7 +4,7 @@
 Role: leakage-safe candidate-feature exploration — imputation/encoding
 experiments, variance & correlation screening, RF-based importance and a
 feature-list export. The AUTHORITATIVE modelling pipeline is
-scripts/04_model_training.py (single sklearn Pipeline); this script never
+ml_pipeline/04_model_training.py (single sklearn Pipeline); this script never
 trains the deployed model and must agree with it on the leakage rule:
 
     the raw risk indicators below CONSTRUCT the target and can NEVER be
@@ -71,7 +71,7 @@ target_col = 'operational_risk_category'
 score_col = 'operational_risk_score'
 id_cols = ['year', 'weight']
 
-# Leakage control — identical rule to scripts/04_model_training.py:
+# Leakage control — identical rule to ml_pipeline/04_model_training.py:
 # these columns built the target and can never be model candidates.
 LEAKAGE_COLS = [
     'employee_turnover_rate', 'employee_turnover_rate_5yr',

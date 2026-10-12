@@ -3,7 +3,7 @@
 Runs the pytest suite programmatically plus data/metadata checks, then
 writes research/tables/table_5_13_system_tests.csv and
 research/system_test_report.md
-Run:  python scripts/research/01_system_tests.py
+Run:  python ml_pipeline/research/01_system_tests.py
 """
 import csv
 import json

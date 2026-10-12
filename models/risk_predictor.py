@@ -81,7 +81,7 @@ class OperationalRiskPredictor:
     # ------------------------------------------------------------------
     def _orig_map(self):
         """Transformed feature name -> original feature name (same rule as
-        scripts/06_shap_explanation.py so dashboards stay consistent)."""
+        ml_pipeline/06_shap_explanation.py so dashboards stay consistent)."""
         if getattr(self, "_mapping", None) is not None:
             return self._mapping
         t_names = list(self.pipe.named_steps["prep"].get_feature_names_out())

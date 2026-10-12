@@ -37,11 +37,11 @@ High ≥ 60, Medium 35–59, Low < 35.
 | Dissertation element | Artifact |
 |---|---|
 | §3.5 dataset characteristics (Table 3.2) | `research/tables/table_3_2_dataset_characteristics.csv` |
-| §3.6 target construction | `scripts/01_data_preparation.py` |
+| §3.6 target construction | `ml_pipeline/01_data_preparation.py` |
 | §3.7 leakage control | `research/tables/table_4_2_excluded_features.csv` |
-| §3.8 model suite (5 models + imbalance variants) | `scripts/04_model_training.py`, `scripts/04b_imbalance_tuning.py` |
-| §3.9 evaluation protocol | `scripts/05_model_evaluation.py` |
-| §3.10 explainability (SHAP) | `scripts/06_shap_explanation.py` |
+| §3.8 model suite (5 models + imbalance variants) | `ml_pipeline/04_model_training.py`, `ml_pipeline/04b_imbalance_tuning.py` |
+| §3.9 evaluation protocol | `ml_pipeline/05_model_evaluation.py` |
+| §3.10 explainability (SHAP) | `ml_pipeline/06_shap_explanation.py` |
 | §3.11 validation contract | `dashboard/validation.py`, `tests/test_validation.py` |
 
 ---
@@ -162,8 +162,8 @@ Screenshots: `research/figures/dashboard_whatif_simulator.png`,
 ## 6. Regeneration
 
 ```bash
-python scripts/research/00_thesis_outputs.py   # figures 4.x/5.x + tables 3.2/4.x/5.1-5.12
-python scripts/research/01_system_tests.py     # ST1-ST19 -> table_5_13 + report
+python ml_pipeline/research/00_thesis_outputs.py   # figures 4.x/5.x + tables 3.2/4.x/5.1-5.12
+python ml_pipeline/research/01_system_tests.py     # ST1-ST19 -> table_5_13 + report
 python -m pytest tests/ -q                     # full suite (29 tests)
 ```
 

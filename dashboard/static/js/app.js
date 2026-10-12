@@ -478,7 +478,7 @@ async function loadInsights() {
       }
       html += "</div>";
     } else {
-      html += "<div class='card'><p>No model information available. Please train models first with <code>python scripts/04_model_training.py</code></p></div>";
+      html += "<div class='card'><p>No model information available. Please train models first with <code>python ml_pipeline/04_model_training.py</code></p></div>";
     }
 
     // Model comparison table with highlighting
@@ -521,7 +521,7 @@ async function loadInsights() {
     }
 
     if (!html) {
-      html = "<div class='card'><p>No insights data available. Please train models first with <code>python scripts/04_model_training.py</code></p></div>";
+      html = "<div class='card'><p>No insights data available. Please train models first with <code>python ml_pipeline/04_model_training.py</code></p></div>";
     }
 
     outEl.innerHTML = html;
@@ -590,7 +590,7 @@ async function loadInsights() {
     console.error("Insights load error:", e);
     toast("Insights unavailable: " + msg, "error");
     outEl.innerHTML =
-      "<div class='err-box'>Unable to load insights. Please train models first with <code>python scripts/04_model_training.py</code></div>";
+      "<div class='err-box'>Unable to load insights. Please train models first with <code>python ml_pipeline/04_model_training.py</code></div>";
   }
 }
 document.getElementById("insights-refresh-btn").onclick = async (ev) => {

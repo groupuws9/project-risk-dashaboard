@@ -128,7 +128,7 @@ Per-class recall (logistic regression): Low 64.9 % · Medium 66.1 % · High 33.3
   Medium 1,105 (16.65 %) · High 28 (0.42 %).
 - **Leakage control:** the ten risk-indicator columns used to *construct* the
   target, plus `operational_risk_score` and the identifiers, are hard-excluded
-  from modelling (enforced in `scripts/04_model_training.py` and regression-
+  from modelling (enforced in `ml_pipeline/04_model_training.py` and regression-
   tested). The model sees **36 pre-existing features** (5 numeric +
   31 categorical) only.
 - **Explainability:** global SHAP importance (tree/linear explainers) and a
@@ -219,7 +219,7 @@ project-risk-dashboard/
 │       ├── dataset_metadata.json
 │       └── processing_summary.txt
 │
-├── scripts/                   # numbered pipeline (run in order)
+├── ml_pipeline/                # numbered machine-learning pipeline (run in order)
 │   ├── 01_data_preparation.py        # merge, clean, build risk score/category
 │   ├── 02_exploratory_analysis.py    # EDA report
 │   ├── 03_feature_engineering.py     # leakage-safe feature config
@@ -285,14 +285,14 @@ End User Licence, then placed in `data/`. If `data/processed/` already contains
 ### Full pipeline (from raw data to dashboard)
 
 ```bash
-python scripts/01_data_preparation.py        # merge + risk score/category
-python scripts/02_exploratory_analysis.py    # EDA report
-python scripts/03_feature_engineering.py     # leakage-safe features
-python scripts/04_model_training.py          # train 5 models -> models/saved_models/
-python scripts/04b_imbalance_tuning.py       # imbalance variants (optional)
-python scripts/05_model_evaluation.py        # metrics + confusion matrices
-python scripts/06_shap_explanation.py        # SHAP artefacts
-python scripts/07_factor_analysis.py         # factor analysis (optional)
+python ml_pipeline/01_data_preparation.py        # merge + risk score/category
+python ml_pipeline/02_exploratory_analysis.py    # EDA report
+python ml_pipeline/03_feature_engineering.py     # leakage-safe features
+python ml_pipeline/04_model_training.py          # train 5 models -> models/saved_models/
+python ml_pipeline/04b_imbalance_tuning.py       # imbalance variants (optional)
+python ml_pipeline/05_model_evaluation.py        # metrics + confusion matrices
+python ml_pipeline/06_shap_explanation.py        # SHAP artefacts
+python ml_pipeline/07_factor_analysis.py         # factor analysis (optional)
 ```
 
 ### Launch the dashboard
@@ -438,7 +438,7 @@ a prediction).
 ## System verification
 
 Beyond unit tests, a 19-point system-test plan (ST1–ST19) is executed against
-the deployed configuration (`python scripts/research/01_system_tests.py`) —
+the deployed configuration (`python ml_pipeline/research/01_system_tests.py`) —
 **19/19 passing** as of the latest run:
 
 | Group | Tests | Verifies |
@@ -465,8 +465,8 @@ chapter → artifact map with the executed numbers. Regenerate everything
 deterministically with:
 
 ```bash
-python scripts/research/00_thesis_outputs.py   # thesis figures + tables
-python scripts/research/01_system_tests.py     # ST1-ST19 evidence
+python ml_pipeline/research/00_thesis_outputs.py   # thesis figures + tables
+python ml_pipeline/research/01_system_tests.py     # ST1-ST19 evidence
 ```
 
 ---
@@ -475,7 +475,7 @@ python scripts/research/01_system_tests.py     # ST1-ST19 evidence
 
 | Symptom | Fix |
 |---|---|
-| `WARNING: model not trained yet` / dashboard starts but predicts fail | run `python scripts/01_data_preparation.py` then `python scripts/04_model_training.py` (the `.pkl` files are not committed) |
+| `WARNING: model not trained yet` / dashboard starts but predicts fail | run `python ml_pipeline/01_data_preparation.py` then `python ml_pipeline/04_model_training.py` (the `.pkl` files are not committed) |
 | `OSError: [Errno 98]` / address already in use | another process holds port 5000 — kill it or change the port in `dashboard/app.py` |
 | Charts render empty / no gauge | the frontend loads Plotly.js from a CDN — check internet access, or self-host the bundle |
 | `ModuleNotFoundError` in scripts | activate the environment installed via `pip install -r requirements.txt` |

@@ -1,7 +1,7 @@
 """Generate all thesis (Chapters 4 & 5) figures and tables from real project data.
 
 Outputs -> research/figures/*.png and research/tables/*.csv|json|md
-Run:  python scripts/research/00_thesis_outputs.py
+Run:  python ml_pipeline/research/00_thesis_outputs.py
 """
 import json
 import sys
