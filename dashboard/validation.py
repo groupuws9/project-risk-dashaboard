@@ -94,7 +94,10 @@ def pydantic_error_to_response(exc: ValidationError,
 
 
 # --------------------------------------------------------------------------
-# Input contract — 36 model features (5 numeric + 31 categorical)
+# Input contract — 36 user-supplied model features (5 numeric + 31
+# categorical). The pipeline additionally derives 4 EFA factor scores
+# (factor_1..factor_4) server-side from these HR items, so the trained model
+# consumes 40 features while the API schema stays at the 36 raw inputs.
 # --------------------------------------------------------------------------
 
 REQUIRED_FIELDS = [

@@ -17,7 +17,18 @@ _ORG = {"sector": "1", "org_size_category_3": "2", "multinational": "2",
 def test_load_best_model():
     p = OperationalRiskPredictor.load()
     assert p.labels == ["Low", "Medium", "High"]
-    assert len(p.features) == 36
+    # 36 raw HR/org features + 4 EFA factor scores (spec 1 §3.7)
+    assert len(p.features) == 40
+    assert [f for f in p.features if f.startswith("factor_")] == [
+        "factor_1", "factor_2", "factor_3", "factor_4"]
+
+
+def test_factor_scores_derived_at_inference():
+    """factor_* must be computed from raw HR items, never left NaN."""
+    p = OperationalRiskPredictor.load()
+    frame = p._frame(_ORG)
+    assert not frame[[c for c in frame.columns
+                      if c.startswith("factor_")]].isna().any().any()
 
 
 def test_predict_returns_valid_label_and_probability():

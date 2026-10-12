@@ -31,6 +31,7 @@ from sklearn.decomposition import PCA
 from sklearn.ensemble import RandomForestClassifier
 import warnings
 import os
+import sys
 import json
 import pickle
 from datetime import datetime
@@ -96,6 +97,15 @@ else:
     feature_cols = [col for col in df.columns
                     if col not in [target_col, score_col] + id_cols + LEAKAGE_COLS]
     print(f"✓ Using leakage-safe candidate features ({len(feature_cols)})")
+# EFA factor scores (factor_1..k) are model features from 04 but are derived —
+# recompute them with the same scoring artifact so the contract resolves.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import efa_tools  # noqa: E402
+df, _efa = efa_tools.ensure(df, BASE / 'models' / 'saved_models' /
+                            'factor_scoring.json')
+missing = [c for c in feature_cols if c not in df.columns]
+if missing:
+    raise SystemExit(f"✗ feature contract columns missing from data: {missing}")
 assert not (set(feature_cols) & set(LEAKAGE_COLS)), "leakage columns leaked in!"
 X = df[feature_cols].copy()
 

@@ -1,6 +1,6 @@
 # System Test Report (ST1-ST19)
 
-Executed: 2026-10-12 01:32:10  
+Executed: 2026-10-12 03:35:28  
 Result: **19/19 passed** (pytest exit code 0)
 
 | Test ID | Description | Result |
@@ -8,7 +8,7 @@ Result: **19/19 passed** (pytest exit code 0)
 | ST1 | Dataset loads with expected dimensions (6,635 x 52) and target present | PASS |
 | ST2 | Target class counts match specification (Low 5,502 / Med 1,105 / High 28) | PASS |
 | ST3 | Leakage features excluded from model input (11 excluded columns) | PASS |
-| ST4 | Best model loads from disk (logreg, 36 features) | PASS |
+| ST4 | Best model loads from disk (logreg, 40 features) | PASS |
 | ST5 | Valid input returns 200 with risk level and probabilities summing to 1 | PASS |
 | ST6 | Missing required field returns 400 MISSING_FIELD | PASS |
 | ST7 | Empty payload lists all missing fields (400) | PASS |

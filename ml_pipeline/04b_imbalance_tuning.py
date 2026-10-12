@@ -14,6 +14,7 @@ saves pkls, and promotes a new best model if balanced accuracy improves.
 """
 from pathlib import Path
 import json
+import sys
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -76,6 +77,16 @@ feats = [c for c in feats if c in df.columns]
 for _d in ("industry_code", "industry_code_80"):
     if _d in feats:
         feats.remove(_d)
+
+# EFA factor scores — identical contract to 04_model_training.py (same saved
+# scoring artifact, models/saved_models/factor_scoring.json).
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import efa_tools  # noqa: E402
+
+df, _art = efa_tools.ensure(df, MODEL_DIR / "factor_scoring.json")
+feats = feats + [c for c in _art["factor_names"] if c not in feats]
+factors = _art["factor_names"]
+print(f"EFA factor scores appended: {factors}")
 
 X = df[feats].copy()
 y = df[TARGET].astype(str).str.strip().map({"Low": 0, "Medium": 1, "High": 2})
@@ -140,7 +151,7 @@ if HAS_XGB and HAS_LGBM:
         final_estimator=LogisticRegression(max_iter=2000,
                                            class_weight="balanced",
                                            random_state=RS),
-        cv=3, n_jobs=-1)
+        cv=5, n_jobs=-1)          # stratified 5-fold (spec 3.4)
     models["stacked_ensemble"] = ImbPipeline([
         ("prep", preprocess), ("resample", SMOTEENN(random_state=RS)),
         ("clf", stacking)])
@@ -170,7 +181,7 @@ if HAS_XGB:
         search = RandomizedSearchCV(
             search_pipe, grid, n_iter=8,
             cv=StratifiedKFold(5, shuffle=True, random_state=RS),
-            scoring="balanced_accuracy", random_state=RS, n_jobs=-1,
+            scoring="balanced_accuracy", random_state=RS, n_jobs=2,
             refit=True, verbose=0)
         search.fit(Xtr, ytr)
         models["xgboost_tuned"] = search.best_estimator_

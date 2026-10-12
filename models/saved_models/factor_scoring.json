@@ -1,0 +1,333 @@
+{
+  "items": [
+    "union_coverage_pct",
+    "collective_bargaining",
+    "bargaining_level_org",
+    "bargaining_level_est",
+    "formal_hr_strategy",
+    "performance_appraisal_pct",
+    "training_budget_exists",
+    "job_security_policy",
+    "jcc_exists",
+    "jcc_frequency",
+    "information_sharing_score",
+    "consultation_depth",
+    "employee_voice_channels",
+    "grievance_procedure_formal",
+    "info_chain_exist",
+    "newsletter_exists"
+  ],
+  "miss_codes": {
+    "union_coverage_pct": [
+      999
+    ],
+    "collective_bargaining": [
+      9,
+      99,
+      999
+    ],
+    "bargaining_level_org": [
+      9,
+      99,
+      999
+    ],
+    "bargaining_level_est": [
+      9,
+      99,
+      999
+    ],
+    "formal_hr_strategy": [
+      9,
+      99,
+      999
+    ],
+    "performance_appraisal_pct": [
+      9,
+      99,
+      999
+    ],
+    "training_budget_exists": [
+      9,
+      99,
+      999
+    ],
+    "job_security_policy": [
+      9,
+      99,
+      999
+    ],
+    "jcc_exists": [
+      9,
+      99,
+      999
+    ],
+    "jcc_frequency": [
+      9,
+      99,
+      999
+    ],
+    "information_sharing_score": [
+      9,
+      99,
+      999
+    ],
+    "consultation_depth": [
+      9,
+      99,
+      999
+    ],
+    "employee_voice_channels": [
+      9,
+      99,
+      999
+    ],
+    "grievance_procedure_formal": [
+      9,
+      99,
+      999
+    ],
+    "info_chain_exist": [
+      9,
+      99,
+      999
+    ],
+    "newsletter_exists": [
+      9,
+      99,
+      999
+    ]
+  },
+  "medians": {
+    "union_coverage_pct": 0.0,
+    "collective_bargaining": 2.0,
+    "bargaining_level_org": 2.0,
+    "bargaining_level_est": 2.0,
+    "formal_hr_strategy": 1.0,
+    "performance_appraisal_pct": 1.0,
+    "training_budget_exists": 1.0,
+    "job_security_policy": 2.0,
+    "jcc_exists": 2.0,
+    "jcc_frequency": 2.0,
+    "information_sharing_score": 1.0,
+    "consultation_depth": 2.0,
+    "employee_voice_channels": 3.0,
+    "grievance_procedure_formal": 1.0,
+    "info_chain_exist": 1.0,
+    "newsletter_exists": 1.0
+  },
+  "mean": {
+    "union_coverage_pct": 33.38108937480708,
+    "collective_bargaining": 1.8180859080633007,
+    "bargaining_level_org": 1.8504898266767145,
+    "bargaining_level_est": 1.9348907309721175,
+    "formal_hr_strategy": 1.329615674453655,
+    "performance_appraisal_pct": 2.1799547852298415,
+    "training_budget_exists": 1.2889223813112283,
+    "job_security_policy": 1.8970610399397136,
+    "jcc_exists": 1.6239638281838733,
+    "jcc_frequency": 1.9630746043707612,
+    "information_sharing_score": 1.3253956292388847,
+    "consultation_depth": 1.8718914845516201,
+    "employee_voice_channels": 2.8422004521477016,
+    "grievance_procedure_formal": 1.0388847023360965,
+    "info_chain_exist": 1.2703843255463452,
+    "newsletter_exists": 1.3770911831198192
+  },
+  "std": {
+    "union_coverage_pct": 44.16004500595231,
+    "collective_bargaining": 0.38577370969461544,
+    "bargaining_level_org": 0.35659063559791737,
+    "bargaining_level_est": 0.24671856864560734,
+    "formal_hr_strategy": 0.489856494368078,
+    "performance_appraisal_pct": 2.1722762999908576,
+    "training_budget_exists": 0.48038162972505355,
+    "job_security_policy": 0.3038791380828785,
+    "jcc_exists": 0.4843892745530181,
+    "jcc_frequency": 0.4687608571878362,
+    "information_sharing_score": 0.4685224794085284,
+    "consultation_depth": 0.3342105978540956,
+    "employee_voice_channels": 0.7332951379675094,
+    "grievance_procedure_formal": 0.19332015482181267,
+    "info_chain_exist": 0.44415835244335233,
+    "newsletter_exists": 0.4846580472179475
+  },
+  "weights": [
+    [
+      -0.046928205287393464,
+      -0.2873462343626543,
+      -0.36214831308804296,
+      -0.09232324978886716
+    ],
+    [
+      0.9530166039437461,
+      -0.09540818534312748,
+      -0.22357404166789965,
+      0.06389367034329324
+    ],
+    [
+      -0.01235292808094858,
+      0.7401776510443735,
+      -0.2669236394273604,
+      0.07850256222873912
+    ],
+    [
+      0.019405904278875,
+      -0.045364557424876224,
+      0.6866723470887007,
+      0.03476942760952599
+    ],
+    [
+      -0.0035003092223333376,
+      -0.006874270723982021,
+      -0.011470640886886959,
+      -0.14949320963953622
+    ],
+    [
+      -0.021906724982174514,
+      -0.03249290404043225,
+      -0.05536958105279719,
+      -0.21799088408224457
+    ],
+    [
+      -0.002020213818065712,
+      -0.010506208110622514,
+      0.009453389215118478,
+      -0.22748721856599452
+    ],
+    [
+      0.03104467358966448,
+      0.03754223105888729,
+      0.0006776682924991034,
+      0.014717093642829726
+    ],
+    [
+      0.0016796363763207757,
+      -0.0002585117820879011,
+      0.058565969987478594,
+      -0.15360517154530662
+    ],
+    [
+      0.0037008513598179396,
+      -0.0035613979931581594,
+      0.01812434647904651,
+      -0.03491977515579319
+    ],
+    [
+      0.016093653280065314,
+      0.012275287856855643,
+      -0.013212107881027798,
+      -0.17537451225979306
+    ],
+    [
+      0.022668953752948525,
+      0.019371234008970093,
+      0.014835652959103775,
+      0.0157887171595323
+    ],
+    [
+      -0.0013695413576943938,
+      0.03585570583918425,
+      0.03029143240258662,
+      -0.11546452431395657
+    ],
+    [
+      -0.011158388346402827,
+      -0.0047851900399672,
+      -0.008181402708044553,
+      -0.17445034168953436
+    ],
+    [
+      -0.007148936426465892,
+      0.00023802798963423275,
+      0.005327580891617079,
+      -0.17418815975234292
+    ],
+    [
+      0.002040455568197185,
+      0.005999232441816357,
+      0.026468288520311224,
+      -0.19296204823825763
+    ]
+  ],
+  "n_factors": 4,
+  "factor_names": [
+    "factor_1",
+    "factor_2",
+    "factor_3",
+    "factor_4"
+  ],
+  "factor_labels": {
+    "factor_1": "collective_bargaining / union_coverage_pct",
+    "factor_2": "bargaining_level_org / union_coverage_pct",
+    "factor_3": "bargaining_level_est / union_coverage_pct",
+    "factor_4": "training_budget_exists / performance_appraisal_pct"
+  },
+  "method": "principal axis factoring + varimax rotation (statsmodels)",
+  "n_observations": 6635,
+  "bartlett_chi2": 16324.383234007622,
+  "bartlett_df": 120,
+  "bartlett_p": 0.0,
+  "kmo_overall": 0.48607494197041906,
+  "kmo_per_item": {
+    "union_coverage_pct": 0.4151196453917845,
+    "collective_bargaining": 0.2532449756222196,
+    "bargaining_level_org": 0.2822178132594138,
+    "bargaining_level_est": 0.1643983889327886,
+    "formal_hr_strategy": 0.765643159951772,
+    "performance_appraisal_pct": 0.6887010710923404,
+    "training_budget_exists": 0.7773963265646079,
+    "job_security_policy": 0.7646246971918895,
+    "jcc_exists": 0.8368229622021879,
+    "jcc_frequency": 0.6632228961475127,
+    "information_sharing_score": 0.6633630708408312,
+    "consultation_depth": 0.578334423097919,
+    "employee_voice_channels": 0.7523317854803051,
+    "grievance_procedure_formal": 0.8147409154988844,
+    "info_chain_exist": 0.8471808038151527,
+    "newsletter_exists": 0.8490252604277976
+  },
+  "eigenvalues": [
+    2.8211662937717135,
+    1.5950262829045874,
+    1.192814072587089,
+    1.14469707115977,
+    1.1243976890599527,
+    1.0167386772105254,
+    0.9465051455475051,
+    0.916959174937307,
+    0.8420827357467394,
+    0.8200078001552973,
+    0.8046530992630234,
+    0.7216987913347647,
+    0.696593102688144,
+    0.667059756471757,
+    0.5543232283839982,
+    0.13527707877783035
+  ],
+  "n_factors_kaiser": 6,
+  "parallel_analysis": {
+    "simulations": 500,
+    "percentile": 95,
+    "seed": 42,
+    "thresholds": [
+      1.1003122397164555,
+      1.0796681804990547,
+      1.0643740005956261,
+      1.051489518882159,
+      1.0404628264981244,
+      1.0306523365422733,
+      1.0203476708952317,
+      1.0112606245588207,
+      1.0029773676894076,
+      0.9934397888001321,
+      0.9836990614525274,
+      0.9745137206657961,
+      0.9641527839139401,
+      0.9549894426387104,
+      0.9449835355567512,
+      0.930110982555619
+    ],
+    "n_factors": 5
+  },
+  "created": "2026-10-12T04:09:52"
+}

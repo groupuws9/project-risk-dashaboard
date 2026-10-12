@@ -198,12 +198,20 @@ for src_name, dst_name in [("shap_beeswarm.png", "fig_5_6_shap_beeswarm.png"),
 # ---------------------------------------------------------------- Tables
 print("== Thesis tables ==")
 
-predictors = [c for c in df.columns if c not in
-              ["serno", "year", "weight", "operational_risk_score", TARGET,
-               "employee_turnover_rate", "absenteeism_rate", "grievance_rate",
-               "disputes_raised", "dispute_risk_level", "dismissal_rate",
-               "disciplinary_warnings", "suspensions",
-               "other_industrial_action"]]
+# Use the feature list from model_metadata.json (40 features used in training)
+META = BASE / "models" / "saved_models" / "model_metadata.json"
+if META.exists():
+    meta = json.loads(META.read_text())
+    predictors = meta["features"]
+else:
+    # Fallback: exclude leakage + high-cardinality vars
+    predictors = [c for c in df.columns if c not in
+                  ["serno", "year", "weight", "operational_risk_score", TARGET,
+                   "employee_turnover_rate", "absenteeism_rate", "grievance_rate",
+                   "disputes_raised", "dispute_risk_level", "dismissal_rate",
+                   "disciplinary_warnings", "suspensions",
+                   "other_industrial_action",
+                   "industry_code", "industry_code_80"]]
 
 # Table 3.2 – dataset characteristics
 chars = pd.DataFrame({
@@ -215,12 +223,15 @@ chars = pd.DataFrame({
         "Workplace (organization)",
         f"{len(df):,}",
         f"{df.shape[1]}",
-        f"{len(predictors)}",
+        # The model was trained on 40 features (36 raw + 4 EFA factor scores)
+        f"{len(meta['features'])}",
         TARGET,
         "3 (Low / Medium / High)",
         " / ".join(f"{counts[c]:,}" for c in ["Low", "Medium", "High"]),
         f"{counts['Low'] / max(counts['High'], 1):.0f}:1",
-        f"{df[predictors].isna().sum().sum():,}",
+        # factor_* scores are derived (not stored in the merged CSV); count only
+        # the columns actually present in it
+        f"{df[[c for c in meta['features'] if c in df.columns]].isna().sum().sum():,}",
         "0 – 100",
         f"{int(df['year'].min())} – {int(df['year'].max())}",
     ]})

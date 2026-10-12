@@ -6,6 +6,19 @@ import pandas as pd
 BASE = Path(__file__).resolve().parent.parent
 MODEL_DIR = BASE / "models" / "saved_models"
 
+_FACTOR_CACHE = {}
+
+
+def _factor_artifact():
+    """Load the EFA scoring artifact once (factor_scoring.json, written by
+    ml_pipeline/04_model_training.py / 07_factor_analysis.py)."""
+    if "artifact" not in _FACTOR_CACHE:
+        import json
+        path = MODEL_DIR / "factor_scoring.json"
+        _FACTOR_CACHE["artifact"] = (json.loads(path.read_text())
+                                     if path.exists() else None)
+    return _FACTOR_CACHE["artifact"]
+
 
 class OperationalRiskPredictor:
     """Load a saved pipeline and predict Low/Medium/High risk."""
@@ -56,7 +69,37 @@ class OperationalRiskPredictor:
                 df[c] = df[c].astype("string").str.strip().fillna("MISSING")
                 df[c] = df[c].replace({"": "MISSING", "nan": "MISSING",
                                        "None": "MISSING"})
+        self._derive_factors(df)
         return df[self.features]
+
+    def _derive_factors(self, df):
+        """Compute factor_* scores from the raw HR items (train/serve parity).
+
+        The model was trained on EFA factor scores derived from items such as
+        union coverage, collective bargaining, JCC, information sharing and
+        consultation depth; the same scoring coefficients stored in
+        models/saved_models/factor_scoring.json are re-applied here so a raw
+        API payload can never be scored differently from training.
+        """
+        if not any(c.startswith("factor_") for c in self.features):
+            return
+        art = _factor_artifact()
+        if not art:
+            return
+        import numpy as np
+        X = df.reindex(columns=art["items"]).apply(pd.to_numeric,
+                                                   errors="coerce")
+        for c, codes in art.get("miss_codes", {}).items():
+            if c in X.columns:
+                X[c] = X[c].replace(list(codes), np.nan)
+        med = pd.Series({c: float(v) for c, v in art["medians"].items()})
+        X = X.astype(float).fillna(med)
+        Z = (X - pd.Series({c: float(v) for c, v in art["mean"].items()})) \
+            / pd.Series({c: float(v) for c, v in art["std"].items()})
+        scores = Z.values @ np.asarray(art["weights"], dtype=float)
+        for i, name in enumerate(art["factor_names"]):
+            if name in df.columns:
+                df[name] = scores[:, i]
 
     def predict(self, org_data):
         """Return (risk_level, max_probability)."""

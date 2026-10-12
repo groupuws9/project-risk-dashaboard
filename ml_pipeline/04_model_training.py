@@ -7,6 +7,7 @@ class weights. Saves pipelines, metrics and metadata for dashboard + 05 script.
 """
 from pathlib import Path
 import json
+import sys
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -55,6 +56,7 @@ LEAKAGE = ["employee_turnover_rate", "employee_turnover_rate_5yr",
     "disciplinary_warnings", "suspensions", SCORE_COL]
 LABELS = ["Low", "Medium", "High"]
 RANDOM_STATE = 42
+N_SPLITS = 5           # stratified k-fold CV folds (spec 3.4)
 
 print("=" * 78)
 print("MODEL TRAINING — WERS 2011 operational risk (Low/Medium/High)")
@@ -78,9 +80,29 @@ feats = [c for c in feats if c in df.columns]
 for _drop in ("industry_code", "industry_code_80"):
     if _drop in feats:
         feats.remove(_drop)
-print(f"Features: {len(feats)}")
 
-X = df[feats].copy()
+# ---- EFA factor scores (spec 1 §3.7): latent HR-practice constructs --------
+# Deterministic full-sample EFA over the 16 HR/ER practice items (union
+# coverage, collective bargaining, JCC, information sharing, consultation
+# depth, ...). The identical scores are re-applied at inference from
+# models/saved_models/factor_scoring.json => train/serve parity.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import efa_tools  # noqa: E402
+
+efa_artifact, _efa_diag = efa_tools.fit(df)
+factors = efa_tools.transform(df, efa_artifact)
+efa_tools.save(efa_artifact, MODEL_DIR / "factor_scoring.json")
+raw_count = len(feats)
+feats = feats + [c for c in factors.columns if c not in feats]
+print(f"EFA: {len(efa_artifact['items'])} items -> {list(factors.columns)} "
+      f"(KMO={efa_artifact['kmo_overall']:.3f}, "
+      f"PA retains {efa_artifact['parallel_analysis']['n_factors']}, "
+      f"retained {efa_artifact['n_factors']})")
+print(f"Features: {len(feats)} ({raw_count} raw + "
+      f"{len(factors.columns)} EFA factor scores)")
+
+X = pd.concat([df[[c for c in feats if c in df.columns]], factors],
+              axis=1)[feats]
 y = df[TARGET].astype(str).str.strip().map({"Low": 0, "Medium": 1, "High": 2})
 mask = y.notna()
 X, y = X.loc[mask].reset_index(drop=True), y.loc[mask].astype(int).reset_index(drop=True)
@@ -144,7 +166,8 @@ print(f"\nTrain {Xtr.shape}  Test {Xte.shape}")
 print("Train dist:", ytr.value_counts().to_dict())
 print("Test  dist:", yte.value_counts().to_dict())
 
-cv = StratifiedKFold(n_splits=3, shuffle=True, random_state=RANDOM_STATE)
+cv = StratifiedKFold(n_splits=N_SPLITS, shuffle=True, random_state=RANDOM_STATE)
+print(f"CV: stratified {N_SPLITS}-fold (shuffle=True, random_state={RANDOM_STATE})")
 results, fitted = {}, {}
 
 
@@ -199,6 +222,8 @@ with open(MODEL_DIR / "model_metadata.json", "w") as f:
     json.dump({"best_model": best_name, "target": TARGET, "labels": LABELS,
                "features": feats, "numeric_features": num_cols,
                "categorical_features": cat_cols, "leakage_excluded": LEAKAGE,
+               "factor_features": list(factors.columns),
+               "cv_folds": N_SPLITS,
                "all_test_balanced_accuracy": {n: r["test"]["balanced_accuracy"]
                                               for n, r in results.items()},
                "random_state": RANDOM_STATE}, f, indent=2)

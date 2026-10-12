@@ -23,7 +23,7 @@ ST_PLAN = [
              "special:target"),
     ("ST3",  "Leakage features excluded from model input (11 excluded columns)",
              "special:leakage"),
-    ("ST4",  "Best model loads from disk (logreg, 36 features)",
+    ("ST4",  "Best model loads from disk (logreg, 40 features)",
              "test_load_best_model"),
     ("ST5",  "Valid input returns 200 with risk level and probabilities summing to 1",
              "test_valid_input_returns_prediction"),

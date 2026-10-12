@@ -1,138 +1,4 @@
-# Operational Risk Prediction & Interactive Dashboard
-
-**Machine-learning classification of business operational risk from the UK Workplace
-Employment Relations Survey 2011 (WERS 2011, UKDA Study 4511), served through an
-interactive Flask dashboard with live SHAP explainability and a what-if scenario
-simulator.**
-
-[![Python](https://img.shields.io/badge/Python-3.13-3776AB?logo=python&logoColor=white)]()
-[![Flask](https://img.shields.io/badge/Flask-3.0-000000?logo=flask&logoColor=white)]()
-[![scikit--learn](https://img.shields.io/badge/scikit--learn-1.8-F7931E?logo=scikitlearn&logoColor=white)]()
-[![Tests](https://img.shields.io/badge/tests-31%20passed-brightgreen)]()
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-
----
-
-## Contents
-
-1. [Overview](#overview)
-2. [Research background](#research-background)
-3. [Key findings](#key-findings)
-4. [Dataset & methodology](#dataset--methodology)
-5. [Packages used](#packages-used)
-6. [Project structure](#project-structure)
-7. [Installation](#installation)
-8. [Running the project](#running-the-project)
-9. [Dashboard & API](#dashboard--api)
-10. [Architecture & design decisions](#architecture--design-decisions)
-11. [System verification](#system-verification)
-12. [Python usage example](#python-usage-example)
-13. [Testing](#testing)
-14. [Research outputs](#research-outputs)
-15. [Troubleshooting](#troubleshooting)
-16. [Limitations & responsible use](#limitations--responsible-use)
-17. [Contributing](#contributing)
-18. [License & data acknowledgement](#license--data-acknowledgement)
-19. [Citation](#citation)
-
----
-
-## Overview
-
-Operational risk — employee turnover, absenteeism, grievances and industrial
-disputes — is costly and unevenly distributed across UK workplaces. This project:
-
-- builds a **leakage-controlled target** (`Low` / `Medium` / `High`) from a
-  composite 0–100 risk index computed over four risk dimensions;
-- trains and compares **five machine-learning models** (logistic regression,
-  random forest, XGBoost, LightGBM, MLP) plus five imbalance-handling variants,
-  selecting on **balanced accuracy** — not raw accuracy — because the target is
-  imbalanced 196.5 : 1;
-- deploys the winning model (**logistic regression**) behind a structured,
-  rate-limited REST API and a four-tab **Flask dashboard**: risk prediction with
-  **live per-input SHAP explanations**, a data explorer, global model insights,
-  and a **what-if simulator** that compares baseline vs scenario organisations
-  side-by-side (delta table, probability chart, changed-fields diff).
-
-The full pipeline is deterministic (`random_state = 42`) and verified by
-**31 pytest tests**, including a 19-point system-test plan (ST1–ST19).
-
----
-
-## Research background
-
-The project answers three research questions drawn from the operational-risk
-and employee-relations literature:
-
-| # | Research question |
-|---|---|
-| **RQ1** | Which organisational, HR and employee-relations predictors significantly influence operational risk levels (turnover, absenteeism, grievances, industrial disputes) in UK workplaces? |
-| **RQ2** | How do different configurations of HR management practices and employee-relations strategies relate to the predictive probability of high operational risk across organisational sizes and sectors? |
-| **RQ3** | To what extent can machine-learning models predict risk levels from pre-existing characteristics, and how can predictions be effectively visualised in an interactive dashboard for decision-makers? |
-
-These map to three objectives and their delivered artefacts:
-
-| Objective | Delivered |
-|---|---|
-| **RO1** — identify key risk determinants | correlation analysis, MDI + SHAP importance rankings, factor analysis of HR practices |
-| **RO2** — develop predictive models | 5 algorithms + 5 imbalance-handling variants, systematic comparison on balanced accuracy |
-| **RO3** — interactive decision-support dashboard | Flask app: prediction with live explanations, data explorer, model insights, what-if simulation |
-
----
-
-## Key findings
-
-All numbers below come from the executed pipeline on the held-out test set
-(n = 1,327 stratified, 20 %).
-
-| Model | Accuracy | **Balanced accuracy** | Macro-F1 | ROC-AUC (OvR) |
-|---|---|---|---|---|
-| **Logistic Regression (deployed)** | 0.649 | **0.550** | 0.410 | 0.746 |
-| LightGBM | 0.797 | 0.441 | 0.436 | 0.782 |
-| Random Forest | 0.822 | 0.435 | 0.442 | 0.806 |
-| XGBoost | 0.829 | 0.404 | 0.417 | 0.804 |
-| MLP (64, 32) | 0.826 | 0.376 | 0.381 | 0.751 |
-
-**Insights**
-
-1. **Accuracy is misleading under imbalance.** Always predicting "Low" already
-   scores ≈ 83 % accuracy. Tree ensembles cluster on the majority class; the
-   logistic regression with balanced class weights generalises far better across
-   all three classes and therefore wins the research's primary metric.
-2. **Cost-sensitive learning beats resampling.** `class_weight="balanced"`
-   (0.550) outperformed SMOTE (0.497), SMOTE-ENN (0.502), tuned XGBoost (0.461)
-   and a stacked ensemble (0.464).
-3. **Employee-relations "voice" drives predictions.** The strongest SHAP
-   drivers are `employee_voice_channels`, `sector`, `trading_status`,
-   `org_size_category_3`, union-coverage bands, `collective_bargaining` and
-   `formal_hr_strategy` — organisational identity and employee-relations
-   practices, not the risk indicators themselves (which are excluded by design).
-4. **The rare High class is genuinely hard.** Only 28 of 6,635 workplaces are
-   High risk (0.42 %); High-class recall is 33 % — a data-scarcity bound that is
-   disclosed in the dashboard itself, not hidden.
-
-Per-class recall (logistic regression): Low 64.9 % · Medium 66.1 % · High 33.3 %.
-
----
-
-## Dataset & methodology
-
-- **Source:** Workplace Employment Relations Survey 2011, UK Data Archive
-  Study 4511. **Raw files are not redistributed with this repository** (see
-  [License & data acknowledgement](#license--data-acknowledgement)).
-- **Processed dataset:** 6,635 workplaces × 52 variables, zero missing values,
-  zero duplicates.
-- **Target:** `operational_risk_score` = four dimensions × 25 points
-  (turnover, absenteeism, industrial action, grievances); categories
-  High ≥ 60, Medium 35–59, Low < 35. Class counts: Low 5,502 (82.92 %) ·
-  Medium 1,105 (16.65 %) · High 28 (0.42 %).
-- **Leakage control:** the ten risk-indicator columns used to *construct* the
-  target, plus `operational_risk_score` and the identifiers, are hard-excluded
-  from modelling (enforced in `ml_pipeline/04_model_training.py` and regression-
-  tested). The model sees **36 pre-existing features** (5 numeric +
-  31 categorical) only.
-- **Explainability:** global SHAP importance (tree/linear explainers) and a
-  **live local explanation per prediction** — exact linear SHAP computed
+*live local explanation per prediction** — exact linear SHAP computed
   server-side for the exact input, aggregated back to the original features.
 
 ---
@@ -207,6 +73,7 @@ Exact versions from the executed environment (Table 4.1 of the dissertation);
 ```
 project-risk-dashboard/
 ├── README.md                  # this file
+├── TRUE_README.md             # deep-dive verification report (dissertation map)
 ├── LICENSE                    # MIT (code)
 ├── requirements.txt           # dependency ranges
 │
@@ -214,12 +81,12 @@ project-risk-dashboard/
 │   ├── wirsts10_july2014.csv        # raw WERS 2011 main survey (NOT in git — UKDA licence)
 │   ├── wirsts25_july2014.csv        # raw WERS 2011 panel file  (NOT in git — UKDA licence)
 │   └── processed/
-│       ├── wers2011_operational_risk_merged.csv   # analysis-ready dataset (52 cols)
-│       ├── wers2011_features_engineered.csv       # exploratory matrix from script 03 (leakage-free)
+│       ├── wers2011_operational_risk_merged.csv   # analysis-ready dataset
+│       ├── wers2011_features_engineered.csv
 │       ├── dataset_metadata.json
 │       └── processing_summary.txt
 │
-├── ml_pipeline/                # numbered machine-learning pipeline (run in order)
+├── scripts/                   # numbered pipeline (run in order)
 │   ├── 01_data_preparation.py        # merge, clean, build risk score/category
 │   ├── 02_exploratory_analysis.py    # EDA report
 │   ├── 03_feature_engineering.py     # leakage-safe feature config
@@ -260,6 +127,7 @@ project-risk-dashboard/
 **Prerequisites:** Python 3.11+ (developed and verified on 3.13.3), pip, git.
 
 ```bash
+pip install -r requirements.txt
 git clone <your-fork-url>
 cd project-risk-dashboard
 
@@ -285,14 +153,16 @@ End User Licence, then placed in `data/`. If `data/processed/` already contains
 ### Full pipeline (from raw data to dashboard)
 
 ```bash
-python ml_pipeline/01_data_preparation.py        # merge + risk score/category
-python ml_pipeline/02_exploratory_analysis.py    # EDA report
-python ml_pipeline/03_feature_engineering.py     # leakage-safe features
-python ml_pipeline/04_model_training.py          # train 5 models -> models/saved_models/
-python ml_pipeline/04b_imbalance_tuning.py       # imbalance variants (optional)
-python ml_pipeline/05_model_evaluation.py        # metrics + confusion matrices
-python ml_pipeline/06_shap_explanation.py        # SHAP artefacts
-python ml_pipeline/07_factor_analysis.py         # factor analysis (optional)
+python ml_pipeline/01_data_preparation.py     # merge + risk score/category
+python ml_pipeline/02_exploratory_analysis.py  # EDA report
+python ml_pipeline/03_feature_engineering.py   # leakage-safe features
+python ml_pipeline/07_factor_analysis.py       # EFA (spec §3.7) — adds factor scores
+python ml_pipeline/04_model_training.py        # train 5 models + metadata (5-fold CV)
+python ml_pipeline/04b_imbalance_tuning.py     # SMOTE / SMOTE-ENN / tuned / stacked
+python ml_pipeline/05_model_evaluation.py      # metrics, CM, ROC
+python ml_pipeline/06_shap_explanation.py      # global + local SHAP
+python ml_pipeline/research/00_thesis_outputs.py  # thesis figures + tables
+python ml_pipeline/research/01_system_tests.py     # ST1-ST19 evidence
 ```
 
 ### Launch the dashboard
@@ -424,7 +294,8 @@ for c in why["contributions"][:5]:
 ## Testing
 
 ```bash
-python -m pytest tests/ -q          # 31 tests, ~3 s
+node_modules/.bin/tsc --noEmit
+python -m pytest tests/ -q          # 32 tests (including factor-score inference)
 ```
 
 The suite covers the predictor wrapper, the Pydantic validation contract
@@ -438,7 +309,7 @@ a prediction).
 ## System verification
 
 Beyond unit tests, a 19-point system-test plan (ST1–ST19) is executed against
-the deployed configuration (`python ml_pipeline/research/01_system_tests.py`) —
+the deployed configuration (`python scripts/research/01_system_tests.py`) —
 **19/19 passing** as of the latest run:
 
 | Group | Tests | Verifies |
@@ -465,8 +336,8 @@ chapter → artifact map with the executed numbers. Regenerate everything
 deterministically with:
 
 ```bash
-python ml_pipeline/research/00_thesis_outputs.py   # thesis figures + tables
-python ml_pipeline/research/01_system_tests.py     # ST1-ST19 evidence
+python scripts/research/00_thesis_outputs.py   # thesis figures + tables
+python scripts/research/01_system_tests.py     # ST1-ST19 evidence
 ```
 
 ---
@@ -475,7 +346,7 @@ python ml_pipeline/research/01_system_tests.py     # ST1-ST19 evidence
 
 | Symptom | Fix |
 |---|---|
-| `WARNING: model not trained yet` / dashboard starts but predicts fail | run `python ml_pipeline/01_data_preparation.py` then `python ml_pipeline/04_model_training.py` (the `.pkl` files are not committed) |
+| `WARNING: model not trained yet` / dashboard starts but predicts fail | run `python scripts/01_data_preparation.py` then `python scripts/04_model_training.py` (the `.pkl` files are not committed) |
 | `OSError: [Errno 98]` / address already in use | another process holds port 5000 — kill it or change the port in `dashboard/app.py` |
 | Charts render empty / no gauge | the frontend loads Plotly.js from a CDN — check internet access, or self-host the bundle |
 | `ModuleNotFoundError` in scripts | activate the environment installed via `pip install -r requirements.txt` |

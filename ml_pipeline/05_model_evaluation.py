@@ -1,12 +1,16 @@
 """05_model_evaluation.py — Deep evaluation of trained models (RO2/RQ3)."""
 from pathlib import Path
 import json
+import sys
 import warnings
 warnings.filterwarnings("ignore")
 
 import joblib
 import numpy as np
 import pandas as pd
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import efa_tools  # noqa: E402
 
 BASE = Path(__file__).resolve().parent.parent
 MODEL_DIR = BASE / "models" / "saved_models"
@@ -41,6 +45,7 @@ LABELS = META["labels"]
 TARGET = META["target"]
 
 df = pd.read_csv(DATA)
+df, _ = efa_tools.ensure(df, MODEL_DIR / "factor_scoring.json")  # EFA scores
 X = df[FEATS].copy()
 y = df[TARGET].astype(str).str.strip().map({"Low": 0, "Medium": 1, "High": 2})
 m = y.notna()

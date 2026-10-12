@@ -8,12 +8,16 @@ Outputs:
 """
 from pathlib import Path
 import json
+import sys
 import warnings
 warnings.filterwarnings("ignore")
 
 import joblib
 import numpy as np
 import pandas as pd
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import efa_tools  # noqa: E402
 
 BASE = Path(__file__).resolve().parent.parent
 DATA = BASE / "data" / "processed" / "wers2011_operational_risk_merged.csv"
@@ -40,6 +44,7 @@ print(f"Best model: {best} ({type(clf).__name__})")
 
 # ---- data: same cleaning as 04/05 ----------------------------------------
 df = pd.read_csv(DATA)
+df, _ = efa_tools.ensure(df, MODEL_DIR / "factor_scoring.json")  # EFA scores
 X = df[FEATS].copy()
 MISS = ["", " ", "NA", "N/A", "nan", "None", "-9", "-8"]
 for c in NUM:

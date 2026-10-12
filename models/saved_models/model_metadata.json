@@ -42,14 +42,22 @@
     "pct_part_time_12",
     "pct_female",
     "pct_temporary",
-    "skill_shortage_reported"
+    "skill_shortage_reported",
+    "factor_1",
+    "factor_2",
+    "factor_3",
+    "factor_4"
   ],
   "numeric_features": [
     "sector_detailed",
     "union_coverage_pct",
     "pct_part_time",
     "pct_part_time_12",
-    "pct_female"
+    "pct_female",
+    "factor_1",
+    "factor_2",
+    "factor_3",
+    "factor_4"
   ],
   "categorical_features": [
     "org_size_category",
@@ -97,17 +105,24 @@
     "suspensions",
     "operational_risk_score"
   ],
+  "factor_features": [
+    "factor_1",
+    "factor_2",
+    "factor_3",
+    "factor_4"
+  ],
+  "cv_folds": 5,
   "all_test_balanced_accuracy": {
-    "logreg": 0.5497934092051738,
-    "random_forest": 0.4354641436994378,
-    "mlp": 0.3755107637460579,
-    "xgboost": 0.4044439873851639,
-    "lightgbm": 0.4408295625942685,
-    "logreg_smoteenn": 0.5023099776040952,
-    "rf_smoteenn": 0.46779377485259843,
-    "xgboost_tuned": 0.46113396407514057,
-    "stacked_ensemble": 0.4636541889483066,
-    "logreg_smote": 0.49730243612596553
+    "logreg": 0.5491873485991132,
+    "random_forest": 0.4276264911559029,
+    "mlp": 0.3378445084327437,
+    "xgboost": 0.4044508432743727,
+    "lightgbm": 0.43183463595228305,
+    "logreg_smoteenn": 0.5041144476438595,
+    "rf_smoteenn": 0.468358700123406,
+    "xgboost_tuned": 0.46655423008364183,
+    "stacked_ensemble": 0.4582270670505964,
+    "logreg_smote": 0.5042447095388273
   },
   "random_state": 42
 }
