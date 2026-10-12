@@ -1,0 +1,12 @@
+Attribute,Value
+Unit of analysis,Workplace (organization)
+Observations,"6,635"
+Total variables,52
+Predictive features,39
+Target variable,operational_risk_category
+Target classes,3 (Low / Medium / High)
+Class balance (Low/Med/High),"5,502 / 1,105 / 28"
+Imbalance ratio (Low:High),196:1
+Missing values (predictors),0
+Score range,0 – 100
+Year span,1998 – 2011

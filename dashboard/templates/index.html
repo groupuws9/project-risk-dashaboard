@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WERS 2011 — Operational Risk Dashboard</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+<script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+</head>
+<body>
+<header>
+  <div class="header-content">
+    <div class="header-title">
+      <h1>Business Operational Risk — WERS 2011</h1>
+      <p>Predict Low / Medium / High risk from organisational &amp; HR characteristics &bull; Best model: <b>{{ best_model }}</b></p>
+    </div>
+    <nav>
+      <button data-tab="predict" class="active">Risk Prediction</button>
+      <button data-tab="explorer">Data Explorer</button>
+      <button data-tab="insights">Model Insights</button>
+      <button data-tab="whatif">What-If Simulator</button>
+    </nav>
+  </div>
+</header>
+<main>
+<section id="tab-predict" class="tab active">
+  <h2>Risk Prediction</h2>
+  <p class="hint">Fill the key organisational / HR fields. Raw turnover/absence/grievance counts are not inputs — the model uses only pre-existing characteristics.</p>
+
+  <form id="predict-form"></form>
+
+  <div class="row">
+    <button id="predict-btn" type="button">Predict Risk</button>
+    <button id="fill-btn" type="button" class="ghost">Fill example</button>
+  </div>
+
+  <div id="predict-out"></div>
+  <div id="predict-gauge"></div>
+  <div id="predict-probs"></div>
+  <div id="predict-shap"></div>
+</section>
+<section id="tab-explorer" class="tab">
+  <h2>Data Explorer</h2>
+  <p class="hint">Upload your cleaned CSV file (wers2011_operational_risk_merged.csv) to enable predictions and insights.</p>
+
+  <h3>Upload Data</h3>
+  <div class="row">
+    <input type="file" id="data-upload" accept=".csv">
+    <button id="upload-btn" type="button">Upload Data</button>
+    <button id="load-sample-btn" type="button" class="ghost">Load Sample Data</button>
+  </div>
+  <div id="upload-status"></div>
+
+  <h3>Filter Data</h3>
+  <div class="row">
+    <label>Sector <select id="f-sector"><option value="">All</option></select></label>
+    <label>Size (3-cat) <select id="f-size"><option value="">All</option></select></label>
+    <button id="explore-btn" type="button">Refresh</button>
+    <button id="export-btn" type="button" class="ghost">Export CSV</button>
+  </div>
+
+  <div id="explore-out"></div>
+
+  <div class="grid2">
+    <div id="chart-dist"></div>
+    <div id="chart-sector"></div>
+  </div>
+</section>
+<section id="tab-insights" class="tab">
+  <h2>Model Insights</h2>
+  <p class="hint">Train models first with <code>python scripts/04_model_training.py</code>, then click Refresh to see model performance and feature importance.</p>
+
+  <div class="row">
+    <button id="insights-refresh-btn" type="button">Refresh Insights</button>
+  </div>
+
+  <div id="insights-out"></div>
+
+  <div class="grid2">
+    <div id="chart-importance"></div>
+    <div id="chart-shap"></div>
+  </div>
+</section>
+<section id="tab-whatif" class="tab">
+  <h2>What-If Simulator</h2>
+  <p class="hint">Edit the scenario (right) vs baseline (left) and compare predicted risk side-by-side. Try adding a formal HR strategy, JCC, or higher appraisal coverage. Simulated changes are model-learned associations from WERS 2011, not causal effects.</p>
+
+  <div class="grid2">
+    <div>
+      <h3>Baseline</h3>
+      <form id="base-form"></form>
+    </div>
+    <div>
+      <h3>Scenario</h3>
+      <form id="alt-form"></form>
+    </div>
+  </div>
+
+  <div class="row">
+    <button id="whatif-btn" type="button">Compare Scenarios</button>
+  </div>
+
+  <div id="whatif-out" class="grid2"></div>
+</section>
+</main>
+<footer><small>WERS 2011 (UKDA 4511) &bull; Flask dashboard &bull; Models exclude leakage features</small></footer>
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>

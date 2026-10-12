@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Data (obtain from UK Data Archive; too large for git)
+data/raw/
+data/*.tab
+*.tab
+
+# Outputs (regenerate locally)
+models/saved_models/*.pkl
+results/
+scripts/training_log.txt
+scripts/training_err.txt
+scripts/eval_log.txt
+scripts/eval_err.txt
+
+# OS / IDE
+.DS_Store
+.vscode/

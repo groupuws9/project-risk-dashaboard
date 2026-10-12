@@ -1,0 +1,15 @@
+Excluded feature,Rationale
+operational_risk_score,Composite target precursor — direct leakage
+employee_turnover_rate,Target dimension component (25 pts)
+employee_turnover_rate_5yr,Target dimension component (turnover)
+absenteeism_rate,Target dimension component (25 pts)
+grievance_rate,Target dimension component (25 pts)
+disputes_raised,Target dimension component (industrial action)
+dispute_risk_level,Target dimension component (industrial action)
+dismissal_rate,Target dimension component (industrial action)
+disciplinary_warnings,Target dimension component (industrial action)
+suspensions,Target dimension component (industrial action)
+other_industrial_action,Target dimension component (industrial action)
+serno,Survey identifier — non-predictive
+year,Survey wave identifier — administrative
+weight,Survey sampling weight — administrative

@@ -1,0 +1,17 @@
+{
+  "n_observations": 6635,
+  "n_variables": 52,
+  "n_predictive_features": 39,
+  "target": "operational_risk_category",
+  "class_counts": {
+    "Low": 5502,
+    "Medium": 1105,
+    "High": 28
+  },
+  "class_pct": {
+    "Low": 82.92,
+    "Medium": 16.65,
+    "High": 0.42
+  },
+  "imbalance_ratio": 196.5
+}
