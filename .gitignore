@@ -9,15 +9,20 @@ data/raw/
 data/*.tab
 *.tab
 
+# WERS survey data (UKDA End User Licence — never commit, raw or derived)
+data/*.csv
+data/processed/*.csv
+
 # Outputs (regenerate locally)
 models/saved_models/*.pkl
 results/
-scripts/training_log.txt
-scripts/training_err.txt
-scripts/eval_log.txt
-scripts/eval_err.txt
+scripts/*_log.txt
+scripts/*_err.txt
 
-# OS / IDE
+# OS / IDE / tooling
 .DS_Store
 .vscode/
+.qodo/
+flask_err*.txt
+flask_log.txt
 
