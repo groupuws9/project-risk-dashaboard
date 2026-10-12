@@ -207,7 +207,6 @@ Exact versions from the executed environment (Table 4.1 of the dissertation);
 ```
 project-risk-dashboard/
 ├── README.md                  # this file
-├── TRUE_README.md             # deep-dive verification report (dissertation map)
 ├── LICENSE                    # MIT (code)
 ├── requirements.txt           # dependency ranges
 │
@@ -215,8 +214,8 @@ project-risk-dashboard/
 │   ├── wirsts10_july2014.csv        # raw WERS 2011 main survey (NOT in git — UKDA licence)
 │   ├── wirsts25_july2014.csv        # raw WERS 2011 panel file  (NOT in git — UKDA licence)
 │   └── processed/
-│       ├── wers2011_operational_risk_merged.csv   # analysis-ready dataset
-│       ├── wers2011_features_engineered.csv
+│       ├── wers2011_operational_risk_merged.csv   # analysis-ready dataset (52 cols)
+│       ├── wers2011_features_engineered.csv       # exploratory matrix from script 03 (leakage-free)
 │       ├── dataset_metadata.json
 │       └── processing_summary.txt
 │

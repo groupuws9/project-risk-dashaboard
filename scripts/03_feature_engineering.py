@@ -1,27 +1,23 @@
 """
-Feature Engineering Script for WERS 2011 Operational Risk Prediction
+03_feature_engineering.py — Exploratory feature analysis (RQ1 companion).
 
-This script performs comprehensive feature engineering including:
-- Missing value imputation with edge case handling
-- Outlier detection and treatment
-- Feature scaling and normalization
-- Categorical encoding
-- Feature selection
-- Dimensionality reduction
+Role: leakage-safe candidate-feature exploration — imputation/encoding
+experiments, variance & correlation screening, RF-based importance and a
+feature-list export. The AUTHORITATIVE modelling pipeline is
+scripts/04_model_training.py (single sklearn Pipeline); this script never
+trains the deployed model and must agree with it on the leakage rule:
 
-Edge Cases Handled:
-- Variables with 100% missing values
-- Variables with single unique value (no variance)
-- Extreme outliers (beyond 5 IQR)
-- Highly correlated features (multicollinearity)
-- Rare categories in categorical variables (<1% frequency)
-- Data type mismatches
-- Infinite values
+    the raw risk indicators below CONSTRUCT the target and can NEVER be
+    candidate features (see models/saved_models/model_metadata.json ->
+    leakage_excluded; verified by system test ST3).
 
-Author: Research Team
-Date: October 2024
+Outputs:
+    data/processed/wers2011_features_engineered.csv   (exploratory matrix)
+    results/features/feature_importance.csv, feature_list.json,
+    feature_engineering_report.txt, feature_engineering_artifacts.pkl
 """
 
+from pathlib import Path
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -41,10 +37,11 @@ from datetime import datetime
 
 warnings.filterwarnings('ignore')
 
-# Configuration
-DATA_PATH = '../data/processed/wers2011_operational_risk_merged.csv'
-OUTPUT_PATH = '../data/processed/'
-FEATURES_PATH = '../results/features/'
+# Configuration (BASE-anchored like the other pipeline scripts)
+BASE = Path(__file__).resolve().parent.parent
+DATA_PATH = BASE / 'data' / 'processed' / 'wers2011_operational_risk_merged.csv'
+OUTPUT_PATH = BASE / 'data' / 'processed'
+FEATURES_PATH = BASE / 'results' / 'features'
 os.makedirs(FEATURES_PATH, exist_ok=True)
 
 # Feature engineering parameters
@@ -74,12 +71,32 @@ target_col = 'operational_risk_category'
 score_col = 'operational_risk_score'
 id_cols = ['year', 'weight']
 
+# Leakage control — identical rule to scripts/04_model_training.py:
+# these columns built the target and can never be model candidates.
+LEAKAGE_COLS = [
+    'employee_turnover_rate', 'employee_turnover_rate_5yr',
+    'absenteeism_rate', 'grievance_rate', 'disputes_raised',
+    'dispute_risk_level', 'other_industrial_action', 'dismissal_rate',
+    'disciplinary_warnings', 'suspensions',
+]
+
 y = df[target_col].copy()
 y_score = df[score_col].copy()
 ids = df[id_cols].copy() if all(col in df.columns for col in id_cols) else pd.DataFrame()
 
-# Feature columns (exclude target and ID columns)
-feature_cols = [col for col in df.columns if col not in [target_col, score_col] + id_cols]
+# Candidate features (pre-existing characteristics ONLY). Prefer the exact
+# contract the deployed model was trained on so this script can never
+# contradict the modelling pipeline.
+_meta_path = BASE / 'models' / 'saved_models' / 'model_metadata.json'
+if _meta_path.exists():
+    feature_cols = json.loads(_meta_path.read_text())['features']
+    print(f"✓ Using trained-model feature contract ({len(feature_cols)} features "
+          f"from model_metadata.json)")
+else:
+    feature_cols = [col for col in df.columns
+                    if col not in [target_col, score_col] + id_cols + LEAKAGE_COLS]
+    print(f"✓ Using leakage-safe candidate features ({len(feature_cols)})")
+assert not (set(feature_cols) & set(LEAKAGE_COLS)), "leakage columns leaked in!"
 X = df[feature_cols].copy()
 
 print(f"✓ Features: {X.shape[1]} variables")
