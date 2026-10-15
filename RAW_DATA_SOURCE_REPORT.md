@@ -1,216 +1,218 @@
-# RAW WERS/WIRS DATA SOURCE REPORT
+# RAW WERS DATA SOURCE REPORT
 
-This report documents the **raw** survey files, the authoritative merge rule and
-the target construction. Everything below is generated from the executed
-pipeline (`ml_pipeline/01_build_dataset.py`) — no figure is hand-typed.
+## Original Data Files
 
----
+The project uses two raw WERS 2011 data files obtained from the UK Data Archive (Study 4511):
 
-## 1. Original data files
+### 1. wirsts10_july2014.csv (originally wirsts10_july2014.tab)
 
-Two raw extracts from the **UK Data Service, Study 4511** (Workplace Employment
-Relations Study time-series), obtained under the **End User Licence
-(Safeguarded data)**. Both shipped as tab-delimited `.tab` files and were
-converted verbatim to CSV for pandas (no transformation, no aggregation).
+**File Details:**
+- Original format: Tab-delimited (.tab)
+- Current format: CSV (.csv)
+- File size: 4.59 MB
+- Observations: 6,635 rows
+- Variables: 320 columns
+- Survey component: Main workplace survey (cross-sectional)
 
-### 1.1 `wirsts10_july2014.tab` — main workplace survey
-
-| Attribute | Value |
-|---|---|
-| Original format | Tab-delimited (`.tab`), latin-1 |
-| Converted file | `wirsts10_july2014.csv` (4.81 MB) |
-| Observations | 6,635 |
-| Variables | 320 |
-| Waves | 3 (1998 / 2004 / 2011) — authoritative for the modern waves |
-
+**Year Distribution:**
 | Year | Count | Percentage |
-|------|------:|-----------:|
-| 1998 | 2,191 | 33.03 % |
-| 2004 | 2,062 | 31.08 % |
-| 2011 | 2,382 | 35.89 % |
-| **Total** | **6,635** | **100 %** |
+|------|-------|------------|
+| 1998 | 2,191 | 33.03% |
+| 2004 | 2,062 | 31.08% |
+| 2011 | 2,382 | 35.89% |
+| **Total** | **6,635** | **100%** |
 
-### 1.2 `wirsts25_july2014.tab` — panel file
+**Key Variables (first 20):**
+- serno (serial number)
+- year (survey year)
+- tallemps (total employees)
+- tallemp3, tallemp4, tallemp5, tallemp6 (employee categories)
+- temp1ago, temp5ago (employment change)
+- tallfem (total female employees)
+- tfempc, tfempc12, tfempc3, tfempc3b, tfempc5b (female employment percentages)
+- tftmale, tftfem (full-time male/female)
+- tallft, tallpt (full-time/part-time)
+- tptpc (part-time percentage)
 
-| Attribute | Value |
-|---|---|
-| Original format | Tab-delimited (`.tab`), latin-1 |
-| Converted file | `wirsts25_july2014.csv` (9.54 MB) |
-| Observations | 13,284 |
-| Variables | 320 |
-| Waves | 7 (1980 / 1984 / 1990 / 1991 / 1998 / 2004 / 2011) |
+**Note:** This file contains 95 columns with mixed data types, requiring low_memory=False during import.
 
+### 2. wirsts25_july2014.csv (originally wirsts25_july2014.tab)
+
+**File Details:**
+- Original format: Tab-delimited (.tab)
+- Current format: CSV (.csv)
+- File size: 9.09 MB
+- Observations: 13,284 rows
+- Variables: 320 columns
+- Survey component: Panel data (longitudinal)
+
+**Year Distribution:**
 | Year | Count | Percentage |
-|------|------:|-----------:|
-| 1980 | 2,040 | 15.36 % |
-| 1984 | 2,019 | 15.20 % |
-| 1990 | 2,061 | 15.53 % |
-| 1991 | 1,693 | 12.75 % |
-| 1998 | 1,929 | 14.52 % |
-| 2004 | 1,648 | 12.41 % |
-| 2011 | 1,894 | 14.26 % |
-| **Total** | **13,284** | **100 %** |
+|------|-------|------------|
+| 1980 | 2,040 | 15.36% |
+| 1984 | 2,019 | 15.20% |
+| 1990 | 2,061 | 15.53% |
+| 1991 | 1,693 | 12.75% |
+| 1998 | 1,929 | 14.52% |
+| 2004 | 1,648 | 12.41% |
+| 2011 | 1,894 | 14.26% |
+| **Total** | **13,284** | **100%** |
 
-**Overlap.** The two files share 5,471 `serno` values (always the same survey
-year) and disagree on only 10 columns (`tempc` turnover, `tcovpc` union
-coverage, `tmgrfpc`, `tverseg`, `tnummema/b`, `tudensa/b`, `tudens6a/b`). All
-5,471 shared rows fall in 1998/2004/2011, so `wirsts25` contributes **no new
-information** for the modern waves.
+**Key Variables (first 20):**
+- serno (serial number)
+- year (survey year)
+- tallemps (total employees)
+- tallemp3, tallemp4, tallemp5, tallemp6 (employee categories)
+- temp1ago, temp5ago (employment change)
+- tallfem (total female employees)
+- tfempc, tfempc12, tfempc3, tfempc3b, tfempc5b (female employment percentages)
+- tftmale, tftfem (full-time male/female)
+- tallft, tallpt (full-time/part-time)
+- tptpc (part-time percentage)
 
+**Note:** This file contains 216 columns with mixed data types, requiring low_memory=False during import.
 
----
+## Data Processing Workflow
 
-## 2. Merge rule (`ml_pipeline/01_build_dataset.py`)
-
-The merge is a **union with no `serno`-year overlap and one coding per wave**:
-
+### Step 1: Load Raw Data
+The data preparation script (`ml_pipeline/01_data_preparation.py`) loads the original tab-delimited files:
+```python
+df_main = pd.read_csv(
+    os.path.join(RAW_DATA_PATH, 'wirsts10_july2014.tab'),
+    sep='\t',
+    low_memory=False
+)
 ```
-merged = wirsts10 (all 6,635 rows, waves 1998/2004/2011)   # authoritative
-       + wirsts25 rows in the early waves only (7,813 rows)  # 1980+1984+1990+1991
-       = 14,448 rows over 7 waves
-```
 
-Using `wirsts10` for the modern waves keeps a **single coding of `tempc`**
-(turnover) inside the modelling waves instead of silently mixing two codings.
-`wirsts25`'s 7,813 unique rows are exactly the four early waves.
+### Step 2: Merge and Clean
+- The main survey (wirsts10) provides the primary workplace-level data
+- The panel data (wirsts25) provides longitudinal information
+- Files are merged on common identifiers (serno, year)
+- The merged dataset is filtered to include only the 1998, 2004, and 2011 waves
 
-Resulting dimensions: **14,448 rows × 53 columns**, waves
-`{1980: 2,040, 1984: 2,019, 1990: 2,061, 1991: 1,693, 1998: 2,191, 2004: 2,062, 2011: 2,382}`.
+### Step 3: Create Operational Risk Score
+The operational risk score is calculated from raw risk indicators:
+- Employee turnover rate
+- Absenteeism rate
+- Grievance rate
+- Disputes raised
+- Dispute risk level
+- Other industrial action
+- Dismissal rate
+- Disciplinary warnings
+- Suspensions
 
-Note this is **not** "the 1998/2004/2011 waves only": the early waves are
-retained for EDA and feature context. `year` is excluded from the *feature* set
-so multi-wave data is not treated as a single-year cross-section.
+Each dimension contributes up to 25 points to a 0–100 score.
 
----
+### Step 4: Create Risk Categories
+Categories are assigned based on the risk score:
+- High: Score ≥ 60
+- Medium: Score 35–59
+- Low: Score < 35
 
-## 3. Target construction (turnover-based)
+### Step 5: Select Features
+After excluding:
+- Identifiers (serno, year, weight)
+- Risk indicators (11 variables)
+- Derived score (operational_risk_score)
 
-The target `operational_risk_category` is the **employee turnover band** derived
-from the genuine continuous rate `tempc`:
+The remaining 36 raw features are organized into:
+- Organizational characteristics (9 variables)
+- HR management practices (11 variables)
+- Employee relations practices (11 variables)
+- Labour market characteristics (5 variables)
 
-| Band | Rule |
-|---|---|
-| Low | turnover ≤ 10 % |
-| Medium | 10 % < turnover ≤ 20 % |
-| High | turnover > 20 % |
+### Step 6: Output Processed Dataset
+The final processed dataset is saved as:
+`data/processed/wers2011_operational_risk_merged.csv`
 
-* UKDS special missing codes (9 / 99 / 999 / 9999.99) and impossible rates
-  (negative or > 100) map to **NaN**, so an unknown target is never silently
-  scored "Low".
-* Small integers such as 8 or 9 are **real** turnover percentages (median 1.9,
-  75th percentile 8.0) and are kept.
-* Rows with an unknown target are dropped from supervised training but kept
-  (labelled NaN) for EDA: **6,385 of 14,448 rows** carry a target.
+**Final Dataset Characteristics:**
+- Observations: 6,635
+- Variables: 52
+- Predictive features: 36 (raw)
+- Target: operational_risk_category (3 classes)
+- Class distribution: Low 5,502 (82.92%), Medium 1,105 (16.65%), High 28 (0.42%)
 
-**Why the composite score was retired.** The original design built a 0–100
-composite over four "dimensions" (turnover, absenteeism, grievances, industrial
-action) with 25 points each. Inspection of the raw extract shows `tsicklog`
-(absenteeism), `tstrike` / `tothact` (industrial action) and `tprocgrv`
-(grievances) are **categorical {1, 2} survey codes, not rates** — numeric
-thresholds such as ">5 %" applied to them are meaningless, and the resulting
-"High" class had 28 members (196 : 1 imbalance). Turnover is the only genuine
-continuous workplace risk rate in the extract, so the target is defined from it
-alone. The `operational_risk_score` column retained in the CSV is only an alias
-of the cleaned turnover rate and is **excluded as leakage**.
+## File Format Conversion
 
----
+The original WERS 2011 data files were provided in tab-delimited format (.tab) by the UK Data Archive. For this project, they were converted to CSV format (.csv) to:
+- Enable easier handling with pandas
+- Maintain compatibility with standard data science workflows
+- Preserve all original data without loss
 
-## 4. Feature contract
+The conversion process:
+1. Read original .tab file with `sep='\t'`
+2. Write to .csv with standard comma separation
+3. Preserve all variable names and data types
+4. No data transformation or aggregation during conversion
 
-| Item | Count |
-|---|---|
-| Mapped columns (identifiers, risk, org, HR, ER, labour) | 51 |
-| Leakage-excluded columns | 14 |
-| Mapped leakage-safe predictors | 35 |
-| Dropped for high cardinality (`industry_code`, `industry_code_80`) | 2 |
-| **Raw model inputs** | **33** |
-| EFA factor scores added by `08_factor_analysis.py` | 4 |
-| **Total model inputs** | **37** (9 numeric + 28 categorical) |
+## Data Access and Licensing
 
-Identifiers excluded from features: `serno`, `year`, `weight`.
-
----
-
-## 5. Output artefacts
-
-| File | Purpose |
-|---|---|
-| `data/processed/wers_operational_risk_merged.csv` | analysis-ready dataset (14,448 × 53) |
-| `data/processed/dataset_metadata.json` | machine-readable metadata + predictor/leakage contract |
-| `data/processed/processing_summary.txt` | human-readable summary (regenerated on every run) |
-| `data/processed/wers_panel_features_engineered.csv` | exploratory feature matrix (step 03) |
-
-Both the JSON and the text summary are **written by the pipeline**, so they can
-never drift from the executed numbers.
-
----
-
-## 6. Data access and licensing
-
-**Source:** UK Data Archive, Study 4511 — Workplace Employment Relations Study
-time-series.
-**Access:** registration + acceptance of the End User Licence.
+**Source:** UK Data Archive (UKDA), Study 4511
+**Title:** Workplace Employment Relations Study 2011
+**Access:** Requires registration and acceptance of End User Licence
 **Restrictions:**
+- Raw data files are not included in this repository
+- Data cannot be redistributed
+- Must cite the UK Data Archive in any publications
+- Original licence terms must be respected
 
-* Raw `.tab` / `.csv` extracts are **not** in this repository (licence).
-* `data/processed/*.csv` derived files are also untracked.
-* Do not redistribute the raw or processed survey data.
-* Cite the UK Data Service in any publication.
+**Acknowledgement:**
+WERS 2011 was funded by the UK Department for Business, Innovation and Skills and conducted by:
+- Institute for Employment Studies
+- National Institute of Economic and Social Research
+- Policy Studies Institute
 
-**Acknowledgement:** WERS was funded by the UK Department for Business,
-Innovation and Skills and conducted by the Institute for Employment Studies, the
-National Institute of Economic and Social Research, and the Policy Studies
-Institute.
+## Important Notes for Dissertation
 
----
+1. **Original Format:** The raw data files were originally in tab-delimited format (.tab) and were converted to CSV for this project. This should be mentioned in the data sources section.
 
-## 7. Dissertation-facing summary (Chapter 3 §3.4)
+2. **Survey Waves:** The dataset contains three survey waves (1998, 2004, 2011) from the main survey, not just 2011 data. The year variable is excluded from the feature set to avoid treating multi-wave data as a single-year cross-section.
 
-**Table 3.2: Verified dataset characteristics**
+3. **Unit of Analysis:** The analysis is at the workplace (organization) level, not individual employee level. Each row represents a distinct workplace.
 
+4. **Data Size:** The original files are substantial (4.59 MB and 9.09 MB) with 320 variables each, but only 52 variables are used in the final processed dataset after feature selection.
+
+5. **Panel Data:** The wirsts25 file contains panel data spanning 1980–2011, but only the 1998, 2004, and 2011 waves are used in the merged dataset to align with the main survey waves.
+
+## Recommended Dissertation Updates
+
+### Chapter 3 (Research Methodology) - Section 3.4.1
+
+**ADD paragraph about original data sources:**
+
+The raw WERS 2011 data were obtained from the UK Data Archive (Study 4511) under its End User Licence. The original files were provided in tab-delimited format (.tab): wirsts10_july2014.tab (main workplace survey, 6,635 observations, 320 variables) and wirsts25_july2014.tab (panel data, 13,284 observations, 320 variables). For this project, these files were converted to CSV format to enable compatibility with pandas-based data processing workflows. The conversion preserved all original data without transformation or aggregation. The main survey file contains records from three waves (1998: 2,191 observations, 2004: 2,062 observations, 2011: 2,382 observations), while the panel file spans 1980–2011. The merged dataset used in this analysis includes only the 1998, 2004, and 2011 waves from the main survey to maintain consistency with the panel data structure.
+
+### Chapter 3 (Research Methodology) - Section 3.4.1
+
+**UPDATE Table 3.2 with additional row:**
+
+**Table 3.2: Verified Dataset Characteristics**
 | Attribute | Value |
-|---|---|
-| Dataset | WERS/WIRS Operational Risk Dataset (turnover-based) |
-| Source | UKDA Study 4511 (WERS time-series: `wirsts10` + `wirsts25`) |
-| Licence | UK Data Service End User Licence (Safeguarded data) |
-| Original format | Tab-delimited (`.tab`), converted to CSV |
-| Unit of analysis | Workplace (organization) |
-| Total observations | 14,448 |
-| Total variables | 53 |
-| Modelled rows (target available) | 6,385 (turnover observed in 1998/2004/2011) |
-| Model inputs | 37 (33 raw + 4 EFA factors; 9 numeric + 28 categorical) |
-| High-cardinality excluded | `industry_code`, `industry_code_80` |
-| Target variable | `operational_risk_category` |
-| Target basis | employee turnover rate (`tempc`), sentinel-cleaned |
-| Target bands | Low ≤ 10 %, Medium 10–20 %, High > 20 % |
-| Class distribution (Low) | 5,077 (79.51 %) |
-| Class distribution (Medium) | 621 (9.73 %) |
-| Class distribution (High) | 687 (10.76 %) |
-| Imbalance ratio (Low : High) | 7.4 : 1 |
+|-----------|-------|
+| Dataset | WERS 2011 Operational Risk Dataset |
+| Source | UKDA Study 4511 (WERS 2011) |
+| Original format | Tab-delimited (.tab) |
+| Processed format | CSV (.csv) |
+| Unit of analysis | Organization-level (workplace surveys) |
+| Total observations | 6,635 |
+| Total variables | 52 |
+| Predictive features (raw) | 36 (5 numeric + 31 categorical) |
+| Predictive features (post-encoding) | Varies by model (one-hot encoding) |
+| Target variable | operational_risk_category |
+| Target classes | 3 (Low / Medium / High) |
+| Class distribution (Low) | 5,502 (82.92%) |
+| Class distribution (Medium) | 1,105 (16.65%) |
+| Class distribution (High) | 28 (0.42%) |
+| Imbalance ratio (Low:High) | 196:1 |
 | Missing values (predictors) | 0 |
-| Turnover rate range (%) | 0.0 – 100.0 |
-| Survey waves | 7 (1980–2011); target defined for 3 (1998/2004/2011) |
-| Train / test split | stratified 80 : 20, `random_state=42` → 5,108 / 1,277 |
-| Cross-validation | `StratifiedKFold(n_splits=5, shuffle=True, random_state=42)` |
+| Score range | 0 – 100 |
+| Survey waves | 3 (1998, 2004, 2011) |
+| Original file sizes | wirsts10: 4.59 MB, wirsts25: 9.09 MB |
+| Original variable count | 320 variables per file |
 
-**Suggested wording (§3.4.1):**
+### Chapter 1 (Introduction) - Section 1.5
 
-> The raw WERS time-series data were obtained from the UK Data Service
-> (Study 4511) under its End User Licence. The original files were provided in
-> tab-delimited format: `wirsts10_july2014.tab` (main workplace survey, 6,635
-> observations, 320 variables, waves 1998/2004/2011) and
-> `wirsts25_july2014.tab` (panel data, 13,284 observations, 320 variables,
-> waves 1980–2011), converted to CSV without transformation. The merge unions
-> all 6,635 main-survey rows with the 7,813 early-wave panel rows, yielding
-> 14,448 workplace-level observations across seven waves. The turnover-based
-> target is defined for the 6,385 rows of the 1998/2004/2011 waves.
+**ADD sentence about data format:**
 
-**Do not use** (superseded values):
-
-* 6,635 rows / 52 variables as the *analysis* dataset
-* the 0–100 composite score and its High ≥ 60 / Medium 35–59 bands
-* class counts 5,502 / 1,105 / 28 and the 196 : 1 imbalance ratio
-* 36 (or 51) model inputs, and three-fold cross-validation
-
-See `EVIDENCE_INTEGRATION_SUMMARY.md` for the full corrections log.
-
+The raw WERS 2011 data files were obtained from the UK Data Archive (Study 4511) in tab-delimited format (.tab) and converted to CSV for processing. The original files contain 320 variables each, with the main survey (wirsts10) providing 6,635 workplace-level observations across three survey waves (1998, 2004, 2011) and the panel file (wirsts25) containing 13,284 observations spanning 1980–2011.

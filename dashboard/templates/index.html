@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>WERS 2011 — Operational Risk Dashboard</title>
+<title>Business Risk Dashboard</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
 </head>
@@ -11,7 +11,7 @@
 <header>
   <div class="header-content">
     <div class="header-title">
-      <h1>Business Operational Risk ( WERS 2011 )</h1>
+      <h1>Business Risk Dashboard</h1>
       <p>Predict Low / Medium / High risk from organisational &amp; HR characteristics &bull; Best model: <b>{{ best_model }}</b></p>
     </div>
     <nav>
@@ -83,7 +83,7 @@
 </section>
 <section id="tab-whatif" class="tab">
   <h2>What-If Simulator</h2>
-  <p class="hint">Edit the scenario (right) vs baseline (left) and compare predicted risk side-by-side. Try adding a formal HR strategy, JCC, or higher appraisal coverage. Simulated changes are model-learned associations from WERS 2011, not causal effects.</p>
+  <p class="hint">Edit the scenario (right) vs baseline (left) and compare predicted risk side-by-side. Try adding a formal HR strategy, JCC, or higher appraisal coverage. Simulated changes are model-learned associations from UK workplace-survey data, not causal effects.</p>
 
   <div class="grid2">
     <div>
@@ -103,7 +103,7 @@
   <div id="whatif-out" class="grid2"></div>
 </section>
 </main>
-<footer><small>WERS 2011 (UKDA 4511) &bull; Flask dashboard &bull; Models exclude leakage features</small></footer>
+<footer><small>Business Risk Dashboard &bull; Models exclude leakage features</small></footer>
 <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 </body>
 </html>
