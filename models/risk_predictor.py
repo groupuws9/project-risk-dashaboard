@@ -11,7 +11,7 @@ _FACTOR_CACHE = {}
 
 def _factor_artifact():
     """Load the EFA scoring artifact once (factor_scoring.json, written by
-    ml_pipeline/04_model_training.py / 07_factor_analysis.py)."""
+    ml_pipeline/04_model_training.py / 08_factor_analysis.py)."""
     if "artifact" not in _FACTOR_CACHE:
         import json
         path = MODEL_DIR / "factor_scoring.json"
@@ -124,7 +124,7 @@ class OperationalRiskPredictor:
     # ------------------------------------------------------------------
     def _orig_map(self):
         """Transformed feature name -> original feature name (same rule as
-        ml_pipeline/06_shap_explanation.py so dashboards stay consistent)."""
+        ml_pipeline/07_shap_explanation.py so dashboards stay consistent)."""
         if getattr(self, "_mapping", None) is not None:
             return self._mapping
         t_names = list(self.pipe.named_steps["prep"].get_feature_names_out())
@@ -152,7 +152,7 @@ class OperationalRiskPredictor:
             return
         import numpy as np
         import pandas as pd
-        csv = BASE / "data" / "processed" / "wers2011_operational_risk_merged.csv"
+        csv = BASE / "data" / "processed" / "wers_operational_risk_merged.csv"
         df = pd.read_csv(csv, usecols=lambda c: c in set(self.features))
         frame = self._frame(df)
         t = self.pipe.named_steps["prep"].transform(frame)

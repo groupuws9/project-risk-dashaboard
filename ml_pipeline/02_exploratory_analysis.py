@@ -1,5 +1,6 @@
 """
-Exploratory Data Analysis (EDA) Script for WERS 2011 Operational Risk Prediction
+Exploratory Data Analysis (EDA) Script for WIRS/WERS Workplace-Panel
+Operational-Risk (turnover-based) Prediction, 1980-2011
 
 This script performs comprehensive exploratory data analysis including:
 - Descriptive statistics
@@ -29,6 +30,7 @@ import warnings
 import os
 import json
 from datetime import datetime
+from pathlib import Path
 
 warnings.filterwarnings('ignore')
 
@@ -37,12 +39,13 @@ plt.style.use('seaborn-v0_8-darkgrid')
 sns.set_palette("husl")
 sns.set_context("paper", font_scale=1.2)
 
-# Configuration
-DATA_PATH = '../data/processed/wers2011_operational_risk_merged.csv'
-OUTPUT_PATH = '../results/figures/'
-REPORT_PATH = '../results/'
-os.makedirs(OUTPUT_PATH, exist_ok=True)
-os.makedirs(REPORT_PATH, exist_ok=True)
+# Configuration (absolute paths — runnable from any working directory)
+BASE = Path(__file__).resolve().parents[1]
+DATA_PATH = BASE / 'data' / 'processed' / 'wers_operational_risk_merged.csv'
+OUTPUT_PATH = BASE / 'results' / 'figures'
+REPORT_PATH = BASE / 'results'
+OUTPUT_PATH.mkdir(parents=True, exist_ok=True)
+REPORT_PATH.mkdir(parents=True, exist_ok=True)
 
 print("=" * 80)
 print("EXPLORATORY DATA ANALYSIS (EDA)")
@@ -167,7 +170,7 @@ for i, (idx, val) in enumerate(risk_counts.items()):
 axes[1].grid(True, alpha=0.3, axis='y')
 
 plt.tight_layout()
-plt.savefig(f'{OUTPUT_PATH}01_risk_distribution.png', dpi=300, bbox_inches='tight')
+plt.savefig(OUTPUT_PATH / '01_risk_distribution.png', dpi=300, bbox_inches='tight')
 print(f"✓ Saved: 01_risk_distribution.png")
 plt.close()
 
@@ -196,7 +199,7 @@ sns.heatmap(corr_df, mask=mask, annot=True, fmt='.2f', cmap='RdBu_r',
             annot_kws={"size": 10})
 ax.set_title('Correlation Matrix: Key Variables', fontsize=14, fontweight='bold', pad=20)
 plt.tight_layout()
-plt.savefig(f'{OUTPUT_PATH}02_correlation_heatmap.png', dpi=300, bbox_inches='tight')
+plt.savefig(OUTPUT_PATH / '02_correlation_heatmap.png', dpi=300, bbox_inches='tight')
 print(f"✓ Saved: 02_correlation_heatmap.png")
 plt.close()
 
@@ -223,7 +226,7 @@ if not size_risk.empty:
                 ha='center', va='bottom', fontsize=9)
     
     plt.tight_layout()
-    plt.savefig(f'{OUTPUT_PATH}03_risk_by_org_size.png', dpi=300, bbox_inches='tight')
+    plt.savefig(OUTPUT_PATH / '03_risk_by_org_size.png', dpi=300, bbox_inches='tight')
     print(f"✓ Saved: 03_risk_by_org_size.png")
     plt.close()
 
@@ -246,11 +249,11 @@ print("=" * 80)
 
 eda_report = f"""
 EXPLORATORY DATA ANALYSIS REPORT
-WERS 2011 Operational Risk Prediction Dataset
+WIRS/WERS Workplace-Panel Operational-Risk (turnover-based) Prediction, 1980-2011
 {'=' * 80}
 
 Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-Dataset: wers2011_operational_risk_merged.csv
+Dataset: wers_operational_risk_merged.csv
 
 {'=' * 80}
 1. DATA OVERVIEW
@@ -258,12 +261,19 @@ Dataset: wers2011_operational_risk_merged.csv
 
 Total Observations: {df.shape[0]:,}
 Total Variables: {df.shape[1]}
+Survey Waves: {sorted(pd.to_numeric(df['year'], errors='coerce').dropna().unique())}
 Duplicate Rows: {df.duplicated().sum()}
 
-Target Variable Distribution:
+Turnover target coverage:
+  Rows with a measurable turnover target: {df['operational_risk_category'].notna().sum():,}
+  Rows without (early waves 1980-1991, turnover not asked): {df['operational_risk_category'].isna().sum():,}
+  -> The turnover-based target is defined only for the 1998/2004/2011 waves;
+     earlier waves are retained for descriptive/historical context.
+
+Target Variable Distribution (turnover-measurable rows):
 {df['operational_risk_category'].value_counts().to_string()}
 
-Risk Score Statistics:
+Turnover Rate Statistics (operational_risk_score, % 0-100):
   Mean: {df['operational_risk_score'].mean():.2f}
   Median: {df['operational_risk_score'].median():.2f}
   Std Dev: {df['operational_risk_score'].std():.2f}
@@ -287,12 +297,13 @@ Top 10 Variables with Most Missing:
 1. Data Quality:
    - Dataset contains {df.shape[0]:,} observations with {df.shape[1]} variables
    - {(df.isnull().sum() > 0).sum()} variables have missing values
-   - Target variable is imbalanced: {df['operational_risk_category'].value_counts()['Low'] / len(df) * 100:.1f}% Low, {df['operational_risk_category'].value_counts()['Medium'] / len(df) * 100:.1f}% Medium, {df['operational_risk_category'].value_counts()['High'] / len(df) * 100:.1f}% High
+   - {df['operational_risk_category'].isna().sum():,} rows (1980-1991 waves) have no turnover target
 
-2. Risk Distribution:
-   - Mean risk score: {df['operational_risk_score'].mean():.2f} (scale 0-100)
-   - Most organizations fall in Low risk category
-   - Only {df['operational_risk_category'].value_counts()['High']} organizations classified as High risk
+2. Risk Distribution (turnover-measurable rows only, n = {df['operational_risk_category'].notna().sum():,}):
+   - Mean turnover rate: {df['operational_risk_score'].mean():.2f}% (scale 0-100)
+   - Class balance (Low/Medium/High): {df['operational_risk_category'].value_counts(normalize=True).get('Low', 0) * 100:.1f}% / {df['operational_risk_category'].value_counts(normalize=True).get('Medium', 0) * 100:.1f}% / {df['operational_risk_category'].value_counts(normalize=True).get('High', 0) * 100:.1f}%
+   - {df['operational_risk_category'].value_counts().get('High', 0)} organizations classified as High risk
+   - Turnover bands: Low <=10%, Medium 10-20%, High >20%
 
 3. Data Characteristics:
    - Mix of numerical and categorical variables
@@ -333,9 +344,9 @@ Top 10 Variables with Most Missing:
 5. NEXT STEPS
 {'=' * 80}
 
-1. Run feature engineering script: python 03_feature_engineering.py
+1. Run feature engineering script: python 03_feature_exploration.py
 2. Train baseline models: python 04_model_training.py
-3. Evaluate model performance: python 05_model_evaluation.py
+3. Evaluate model performance: python 06_model_evaluation.py
 4. Develop interactive dashboard: python dashboard/app.py
 
 {'=' * 80}
@@ -371,5 +382,5 @@ print(f"  - summary_statistics.csv")
 print(f"  - correlation_matrix.csv")
 print(f"\nFigures saved in: {OUTPUT_PATH}")
 print("\nNext step: Run feature engineering script")
-print("  python 03_feature_engineering.py")
+print("  python 03_feature_exploration.py")
 print("=" * 80)

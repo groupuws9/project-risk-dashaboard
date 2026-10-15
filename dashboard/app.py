@@ -35,7 +35,7 @@ CORS(app)  # spec 3.9: Flask-CORS
 
 MODEL_DIR = BASE / "models" / "saved_models"
 TAB_DIR = BASE / "results" / "tables"
-DATA_PATH = BASE / "data" / "processed" / "wers2011_operational_risk_merged.csv"
+DATA_PATH = BASE / "data" / "processed" / "wers_operational_risk_merged.csv"
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(levelname)s %(message)s")
@@ -285,7 +285,7 @@ def api_data_export():
         d = d[d["org_size_category_3"].astype(str) == str(size)]
     csv = d.to_csv(index=False)
     return Response(csv, mimetype="text/csv", headers={
-        "Content-Disposition": "attachment; filename=wers2011_filtered.csv"})
+        "Content-Disposition": "attachment; filename=wers_panel_filtered.csv"})
 
 
 @app.route("/api/data/upload", methods=["POST"])

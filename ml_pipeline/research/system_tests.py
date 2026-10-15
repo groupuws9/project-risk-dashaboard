@@ -3,7 +3,7 @@
 Runs the pytest suite programmatically plus data/metadata checks, then
 writes research/tables/table_5_13_system_tests.csv and
 research/system_test_report.md
-Run:  python ml_pipeline/research/01_system_tests.py
+Run:  python ml_pipeline/research/system_tests.py
 """
 import csv
 import json
@@ -17,13 +17,14 @@ TAB = BASE / "research" / "tables"
 TAB.mkdir(parents=True, exist_ok=True)
 
 ST_PLAN = [
-    ("ST1",  "Dataset loads with expected dimensions (6,635 x 52) and target present",
+    ("ST1",  "Dataset loads with expected dimensions (14,448 x 53) and target present",
              "special:dataset"),
-    ("ST2",  "Target class counts match specification (Low 5,502 / Med 1,105 / High 28)",
+    ("ST2",  "Target class counts match turnover spec (Low 5,077 / Med 621 / High 687)",
              "special:target"),
-    ("ST3",  "Leakage features excluded from model input (11 excluded columns)",
+    ("ST3",  "Leakage features excluded from model input (14 excluded columns; "
+             "turnover not a feature)",
              "special:leakage"),
-    ("ST4",  "Best model loads from disk (logreg, 40 features)",
+    ("ST4",  "Best model loads from disk with its full feature vector",
              "test_load_best_model"),
     ("ST5",  "Valid input returns 200 with risk level and probabilities summing to 1",
              "test_valid_input_returns_prediction"),
@@ -78,23 +79,38 @@ def special_check(kind):
     """Data/metadata checks for ST1-ST3."""
     import pandas as pd
     df = pd.read_csv(BASE / "data" / "processed" /
-                     "wers2011_operational_risk_merged.csv")
+                     "wers_operational_risk_merged.csv")
     if kind == "dataset":
-        ok = df.shape == (6635, 52)
+        # Merged WERS/WIRS time-series: 14,448 workplaces over 7 waves
+        # (1980/1984/1990/1991/1998/2004/2011); target column present.
+        ok = df.shape == (14448, 53) and "operational_risk_category" in df.columns
         return ("PASS" if ok else "FAIL", f"shape={df.shape}")
     if kind == "target":
+        # Turnover-based target (tempc): rows without an observed turnover rate
+        # are NaN and excluded from training, so counts cover the modelled rows.
         c = df["operational_risk_category"].value_counts()
-        ok = (c.get("Low", 0) == 5502 and c.get("Medium", 0) == 1105
-              and c.get("High", 0) == 28)
+        modelled = int(df["operational_risk_category"].notna().sum())
+        ok = (c.get("Low", 0) == 5077 and c.get("Medium", 0) == 621
+              and c.get("High", 0) == 687)
         return ("PASS" if ok else "FAIL",
-                f"Low={c.get('Low')} Med={c.get('Medium')} High={c.get('High')}")
+                f"Low={c.get('Low')} Med={c.get('Medium')} High={c.get('High')} "
+                f"(modelled={modelled})")
     if kind == "leakage":
         meta = json.loads((BASE / "models" / "saved_models" /
                            "model_metadata.json").read_text())
         leak = meta.get("leakage_excluded", [])
-        ok = len(leak) == 11 and "operational_risk_score" in leak
+        # Target basis (turnover) + raw risk indicators + the two
+        # duplicate-derived predictors + the retired composite score.
+        must = {"employee_turnover_rate", "operational_risk_score",
+                "grievance_procedure_formal", "training_problems",
+                "skill_shortage_reported"}
+        ok = len(leak) == 14 and must.issubset(set(leak))
+        # The target basis must never appear among model features.
+        feats = set(meta.get("features", []))
+        ok = ok and "employee_turnover_rate" not in feats
         return ("PASS" if ok else "FAIL",
-                f"{len(leak)} leakage features excluded")
+                f"{len(leak)} leakage columns excluded; "
+                f"turnover not in features={'employee_turnover_rate' not in feats}")
     return "FAIL", "unknown special check"
 
 

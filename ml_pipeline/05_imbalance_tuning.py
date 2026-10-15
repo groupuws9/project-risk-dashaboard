@@ -1,4 +1,4 @@
-"""04b_imbalance_tuning.py — advanced imbalance handling & tuning (spec 2).
+"""05_imbalance_tuning.py — advanced imbalance handling & tuning (spec 2).
 
 Adds to the base comparison from 04_model_training.py:
   * logreg_smoteenn  — SMOTEENN resampling + balanced logistic regression
@@ -48,9 +48,9 @@ except Exception:
     HAS_LGBM = False
 
 BASE = Path(__file__).resolve().parent.parent
-DATA = BASE / "data" / "processed" / "wers2011_operational_risk_merged.csv"
-META_JSON = BASE / "data" / "processed" / "dataset_metadata.json"
+DATA = BASE / "data" / "processed" / "wers_operational_risk_merged.csv"
 MODEL_DIR = BASE / "models" / "saved_models"
+META_JSON = MODEL_DIR / "model_metadata.json"
 TABLE_DIR = BASE / "results" / "tables"
 FIG_DIR = BASE / "results" / "figures"
 
@@ -58,7 +58,8 @@ TARGET = "operational_risk_category"
 SCORE_COL = "operational_risk_score"
 ID_COLS = ["serno", "year", "weight"]
 LEAKAGE = ["employee_turnover_rate", "employee_turnover_rate_5yr",
-           "absenteeism_rate", "grievance_rate", "disputes_raised",
+           "absenteeism_rate", "grievance_rate", "grievance_procedure_formal",
+           "training_problems", "skill_shortage_reported", "disputes_raised",
            "dispute_risk_level", "other_industrial_action", "dismissal_rate",
            "disciplinary_warnings", "suspensions", SCORE_COL]
 LABELS = ["Low", "Medium", "High"]
@@ -69,14 +70,20 @@ print("IMBALANCE HANDLING + HYPERPARAMETER TUNING + STACKING (spec 2)")
 print("=" * 78)
 
 df = pd.read_csv(DATA)
-meta = json.loads(META_JSON.read_text())
-cats = meta["variable_categories"]
-feats = (cats["organizational"] + cats["hr_practices"]
-         + cats["employee_relations"] + cats["labor_market"])
-feats = [c for c in feats if c in df.columns]
-for _d in ("industry_code", "industry_code_80"):
-    if _d in feats:
-        feats.remove(_d)
+
+# ---- feature contract: reuse the exact leakage-safe feature list that
+# 04_model_training.py wrote to model_metadata.json (33 raw + 4 EFA factors)
+# so the imbalance variants are trained on identical inputs. Fall back to a
+# metadata-free filter only if that contract is absent.
+meta = json.loads(META_JSON.read_text()) if META_JSON.exists() else {}
+if "features" in meta:
+    feats = [c for c in meta["features"] if c in df.columns]
+else:
+    feats = [c for c in df.columns
+             if c not in ID_COLS + LEAKAGE + [TARGET]]
+    for _d in ("industry_code", "industry_code_80"):
+        if _d in feats:
+            feats.remove(_d)
 
 # EFA factor scores — identical contract to 04_model_training.py (same saved
 # scoring artifact, models/saved_models/factor_scoring.json).
@@ -84,9 +91,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import efa_tools  # noqa: E402
 
 df, _art = efa_tools.ensure(df, MODEL_DIR / "factor_scoring.json")
-feats = feats + [c for c in _art["factor_names"] if c not in feats]
-factors = _art["factor_names"]
-print(f"EFA factor scores appended: {factors}")
+factors = [c for c in _art["factor_names"] if c in df.columns]
+missing = [c for c in feats if c not in df.columns]
+if missing:
+    raise SystemExit(f"✗ feature contract columns missing from data: {missing}")
+assert not (set(feats) & set(LEAKAGE)), "leakage columns leaked in!"
+print(f"Feature contract: {len(feats)} features "
+      f"({len(factors)} EFA factors: {factors})")
 
 X = df[feats].copy()
 y = df[TARGET].astype(str).str.strip().map({"Low": 0, "Medium": 1, "High": 2})
@@ -94,19 +105,40 @@ m = y.notna()
 X, y = X.loc[m].reset_index(drop=True), y.loc[m].astype(int).reset_index(drop=True)
 
 # ---- identical cleaning to 04 (median/mode imputation lives in `prep`) ----
+# Column TYPE ASSIGNMENT must match 04 exactly, otherwise the imbalance
+# pipelines would disagree with the deployed model's frame and the median
+# imputer would choke on "MISSING" strings. Authoritative source:
+# model_metadata.json -> numeric_features / categorical_features (written by
+# 04). The heuristic below replicates 04's rule only if that contract is absent.
 MISS = ["", " ", "NA", "N/A", "nan", "None", "-9", "-8"]
-num_cols, cat_cols = [], []
+_num_meta = meta.get("numeric_features")
+_cat_meta = meta.get("categorical_features")
+if _num_meta is not None and _cat_meta is not None:
+    num_cols = [c for c in _num_meta if c in feats]
+    cat_cols = [c for c in _cat_meta if c in feats]
+else:
+    num_cols, cat_cols = [], []
+    for c in feats:
+        s = X[c].replace(MISS, np.nan)
+        coerced = pd.to_numeric(s, errors="coerce")
+        valid = s.notna().sum()
+        ratio = (coerced.notna().sum() / valid) if valid else 0
+        (num_cols if (ratio > 0.85 and coerced.nunique(dropna=True) > 12)
+         else cat_cols).append(c)
+_assigned = set(num_cols) | set(cat_cols)
+for c in feats:                      # every feature needs a column type
+    if c not in _assigned:
+        cat_cols.append(c)           # categorical: mode/one-hot never chokes
 for c in feats:
-    if c in X.columns:
-        X[c] = X[c].replace(MISS, np.nan)
-    if pd.api.types.is_numeric_dtype(X[c]):
+    if c not in X.columns:
+        continue
+    X[c] = X[c].replace(MISS, np.nan)
+    if c in num_cols:
         X[c] = pd.to_numeric(X[c], errors="coerce")
-        num_cols.append(c)
     else:
         X[c] = X[c].astype(str).str.strip().replace({"": "MISSING",
                                                       "nan": "MISSING",
                                                       "None": "MISSING"})
-        cat_cols.append(c)
 
 preprocess = ColumnTransformer([
     ("num", Pipeline([("imp", SimpleImputer(strategy="median")),
@@ -230,24 +262,23 @@ comp = comp.sort_values("test_balanced_accuracy", ascending=False)
 comp.to_csv(comp_path, index=False)
 print(f"\nUpdated {comp_path}")
 
-# ---- promote best model if improved ---------------------------------------
+# ---- report imbalance variants (do NOT re-select the deployed model) -------
+# Best-model selection happens ONLY in 04_model_training.py, by *training*
+# 5-fold CV balanced accuracy; the held-out test split is reported but never
+# used for selection. Promoting here would leak test data into model choice
+# and could swap the linear deployed model for a tree ensemble, breaking the
+# exact local-SHAP contract (contribution = coef . (x - E[x])). So each
+# imbalance variant's test balanced accuracy is recorded for the comparison
+# table/figure and `best_model` is left exactly as 04 selected it.
 mdl_path = MODEL_DIR / "model_metadata.json"
 mdl = json.loads(mdl_path.read_text())
 mdl.setdefault("all_test_balanced_accuracy", {}).update(
     {n: r["balanced_accuracy"] for n, r in results.items()})
 cur_best = mdl["best_model"]
-cur_best_score = mdl["all_test_balanced_accuracy"].get(cur_best, -1)
-winner = max(mdl["all_test_balanced_accuracy"],
-             key=lambda k: mdl["all_test_balanced_accuracy"][k])
-if mdl["all_test_balanced_accuracy"][winner] > cur_best_score:
-    joblib.dump(joblib.load(MODEL_DIR / f"{winner}.pkl"),
-                MODEL_DIR / "best_model.pkl")
-    (MODEL_DIR / "best_model_name.txt").write_text(winner)
-    mdl["best_model"] = winner
-    print(f">>> NEW BEST MODEL: {winner} "
-          f"(bal_acc={mdl['all_test_balanced_accuracy'][winner]:.3f})")
-else:
-    print(f">>> best model unchanged: {cur_best} "
-          f"(bal_acc={cur_best_score:.3f})")
+top_variant = max(results, key=lambda n: results[n]["balanced_accuracy"])
+print(f">>> deployed best model unchanged: {cur_best} (selected by training "
+      f"CV in 04); best imbalance variant {top_variant} "
+      f"test bal_acc={results[top_variant]['balanced_accuracy']:.3f} "
+      f"reported only")
 mdl_path.write_text(json.dumps(mdl, indent=2))
-print("DONE. Next: python 05_model_evaluation.py && python 06_shap_explanation.py")
+print("DONE. Next: python 06_model_evaluation.py && python 07_shap_explanation.py")

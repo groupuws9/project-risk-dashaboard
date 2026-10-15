@@ -1,5 +1,5 @@
 """
-03_feature_engineering.py — Exploratory feature analysis (RQ1 companion).
+03_feature_exploration.py — Exploratory feature analysis (RQ1 companion).
 
 Role: leakage-safe candidate-feature exploration — imputation/encoding
 experiments, variance & correlation screening, RF-based importance and a
@@ -12,7 +12,7 @@ trains the deployed model and must agree with it on the leakage rule:
     leakage_excluded; verified by system test ST3).
 
 Outputs:
-    data/processed/wers2011_features_engineered.csv   (exploratory matrix)
+    data/processed/wers_panel_features_engineered.csv    (exploratory matrix)
     results/features/feature_importance.csv, feature_list.json,
     feature_engineering_report.txt, feature_engineering_artifacts.pkl
 """
@@ -40,7 +40,7 @@ warnings.filterwarnings('ignore')
 
 # Configuration (BASE-anchored like the other pipeline scripts)
 BASE = Path(__file__).resolve().parent.parent
-DATA_PATH = BASE / 'data' / 'processed' / 'wers2011_operational_risk_merged.csv'
+DATA_PATH = BASE / 'data' / 'processed' / 'wers_operational_risk_merged.csv'
 OUTPUT_PATH = BASE / 'data' / 'processed'
 FEATURES_PATH = BASE / 'results' / 'features'
 os.makedirs(FEATURES_PATH, exist_ok=True)
@@ -410,7 +410,7 @@ if not ids.empty:
     final_df = pd.concat([ids.reset_index(drop=True), final_df], axis=1)
 
 # Save final feature set
-output_file = os.path.join(OUTPUT_PATH, 'wers2011_features_engineered.csv')
+output_file = os.path.join(OUTPUT_PATH, 'wers_panel_features_engineered.csv')
 final_df.to_csv(output_file, index=False)
 print(f"✓ Saved engineered features: {output_file}")
 print(f"  Shape: {final_df.shape}")
@@ -452,7 +452,7 @@ print("=" * 80)
 
 feature_eng_report = f"""
 FEATURE ENGINEERING REPORT
-WERS 2011 Operational Risk Prediction Dataset
+WIRS/WERS Workplace-Panel Operational-Risk (turnover-based) Prediction, 1980-2011
 {'=' * 80}
 
 Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
@@ -532,7 +532,7 @@ Class Balance Ratio: {df[target_col].value_counts().min() / df[target_col].value
 5. OUTPUT FILES GENERATED
 {'=' * 80}
 
-1. wers2011_features_engineered.csv
+1. wers_panel_features_engineered.csv
    - Final processed dataset with engineered features
    - Shape: {final_df.shape}
    - Ready for machine learning
@@ -604,7 +604,7 @@ print(f"\nInput: {df.shape[0]:,} rows × {df.shape[1]} columns")
 print(f"Output: {final_df.shape[0]:,} rows × {final_df.shape[1]} columns")
 print(f"\nFeature reduction: {X.shape[1]} → {X_final.shape[1]} features ({((X.shape[1] - X_final.shape[1]) / X.shape[1] * 100):.1f}% reduction)")
 print(f"\nOutput files:")
-print(f"  - wers2011_features_engineered.csv")
+print(f"  - wers_panel_features_engineered.csv")
 print(f"  - feature_importance.csv")
 print(f"  - feature_list.json")
 print(f"  - feature_engineering_artifacts.pkl")

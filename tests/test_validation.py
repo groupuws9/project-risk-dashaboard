@@ -1,4 +1,7 @@
 """Unit tests for the Pydantic input contract (spec 2 §3.7.1)."""
+import json
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
@@ -7,10 +10,25 @@ from dashboard.validation import (MODEL_FEATURES, REQUIRED_FIELDS,
                                   validate_payload)
 
 
-def test_all_36_model_features_covered():
-    assert len(MODEL_FEATURES) == 36
+def _model_raw_features():
+    """Raw (non-factor) features the trained model actually consumes."""
+    meta = json.loads(
+        (Path(__file__).resolve().parent.parent / "models" / "saved_models"
+         / "model_metadata.json").read_text())
+    factors = set(meta.get("factor_features", []))
+    return [f for f in meta["features"] if f not in factors]
+
+
+def test_schema_matches_trained_model_features():
+    # The API contract must expose exactly the model's raw inputs (the 4 EFA
+    # factor scores are derived server-side, never supplied by the caller).
+    raw = _model_raw_features()
+    assert set(MODEL_FEATURES) == set(raw)
+    assert len(MODEL_FEATURES) == len(set(MODEL_FEATURES))  # no duplicates
+    assert len(MODEL_FEATURES) == len(raw)
     for f in REQUIRED_FIELDS:
         assert f in MODEL_FEATURES
+
 
 
 def test_extra_fields_ignored():

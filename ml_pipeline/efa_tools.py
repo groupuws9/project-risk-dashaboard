@@ -7,9 +7,9 @@ axis factoring + varimax rotation (statsmodels), and determines the factor
 count from the scree plot + parallel analysis.
 
 Used by:
-  ml_pipeline/07_factor_analysis.py  — full report (loadings, scree, scores CSV)
+  ml_pipeline/08_factor_analysis.py  — full report (loadings, scree, scores CSV)
   ml_pipeline/04_model_training.py   — appends factor scores as model features
-  04b / 05 / 06 / 03                 — re-applies the saved scoring artifact
+  05 / 06 / 03                  — re-applies the saved scoring artifact
   models/risk_predictor.py           — loads the JSON artifact at inference time
 
 fit() is deterministic (no RNG in extraction; parallel analysis uses a fixed

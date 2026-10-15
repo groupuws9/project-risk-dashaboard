@@ -1,4 +1,4 @@
-"""06_shap_explanation.py — SHAP global + local explanations (spec 2 §3.6).
+"""07_shap_explanation.py — SHAP global + local explanations (spec 2 §3.6).
 
 Outputs:
   results/tables/shap_importance.csv   mean |SHAP| aggregated to original features
@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import efa_tools  # noqa: E402
 
 BASE = Path(__file__).resolve().parent.parent
-DATA = BASE / "data" / "processed" / "wers2011_operational_risk_merged.csv"
+DATA = BASE / "data" / "processed" / "wers_operational_risk_merged.csv"
 MODEL_DIR = BASE / "models" / "saved_models"
 TAB_DIR = BASE / "results" / "tables"
 FIG_DIR = BASE / "results" / "figures"
@@ -30,7 +30,7 @@ FIG_DIR.mkdir(parents=True, exist_ok=True)
 N_BG, N_EVAL = 80, 300   # keep KernelExplainer tractable
 
 print("=" * 78)
-print("SHAP EXPLANATIONS — WERS 2011 operational risk")
+print("SHAP EXPLANATIONS — WIRS/WERS workplace-panel operational risk (turnover-based)")
 print("=" * 78)
 
 meta = json.loads((MODEL_DIR / "model_metadata.json").read_text())

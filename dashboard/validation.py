@@ -11,7 +11,7 @@ specifications:
     INTERNAL_ERROR  500   unexpected server failure
     RATE_LIMITED    429   too many requests
 
-Constraint ranges follow the real WERS 2011 feature semantics (coded survey
+Constraint ranges follow the real WERS/WIRS feature semantics (coded survey
 answers -> loose integer bands; percentages -> 0-100).
 """
 from __future__ import annotations
@@ -94,11 +94,15 @@ def pydantic_error_to_response(exc: ValidationError,
 
 
 # --------------------------------------------------------------------------
-# Input contract — 36 user-supplied model features (5 numeric + 31
+# Input contract — 33 user-supplied raw model features (6 numeric + 27
 # categorical). The pipeline additionally derives 4 EFA factor scores
-# (factor_1..factor_4) server-side from these HR items, so the trained model
-# consumes 40 features while the API schema stays at the 36 raw inputs.
+# (factor_1..factor_4) server-side from the HR items, so the trained model
+# consumes 37 features while the API schema exposes exactly the 33 raw
+# inputs. The 3 target-derived / duplicate-source columns the reviewer
+# flagged (training_problems, grievance_procedure_formal,
+# skill_shortage_reported) are intentionally NOT part of the contract.
 # --------------------------------------------------------------------------
+
 
 REQUIRED_FIELDS = [
     "sector",
@@ -162,7 +166,6 @@ class OperationalRiskInput(BaseModel):
     bargaining_level_est: Optional[int] = Field(None, **_CODE)
     formal_hr_strategy: Optional[int] = Field(None, **_CODE)
     training_budget_exists: Optional[int] = Field(None, **_CODE)
-    training_problems: Optional[int] = Field(None, **_CODE)
     job_security_policy: Optional[int] = Field(None, **_CODE)
     jcc_frequency: Optional[int] = Field(None, **_CODE)
     jcc_function: Optional[int] = Field(None, **_CODE)
@@ -172,8 +175,6 @@ class OperationalRiskInput(BaseModel):
     investment_plans_shared: Optional[int] = Field(None, **_CODE)
     consultation_depth: Optional[int] = Field(None, **_CODE)
     employee_voice_channels: Optional[int] = Field(None, **_CODE)
-    grievance_procedure_formal: Optional[int] = Field(None, **_CODE)
-    skill_shortage_reported: Optional[int] = Field(None, **_CODE)
 
 
 MODEL_FEATURES = list(OperationalRiskInput.model_fields)

@@ -6,10 +6,10 @@
 ## Architecture & design decisions
 
 ```
-WERS .tab ──► 01 prepare ──► merged CSV ──► 03 features ──► 04 train ──► Pipeline(.pkl)
+WERS .tab ──► 01_build_dataset ──► merged CSV ──► 03 features ──► 04 train ──► Pipeline(.pkl)
                   │                                              │            │
-                  └── risk score/category (target)               │            ▼
-                                                                 │      Flask REST API
+                  └── turnover band (target)                    │            ▼
+                                                                │      Flask REST API
                         05 evaluate ──► metrics/CM/ROC           │       ├── /api/predict  (+ live SHAP)
                         06 SHAP      ──► global importance       ▼       ├── /api/whatif
                                        local fallback JSON   metadata   └── /api/insights, /api/features, /api/data/*
@@ -63,7 +63,7 @@ Exact versions from the executed environment (Table 4.1 of the dissertation);
 | Flask-Cors | 6.0.2 | cross-origin support |
 | pydantic | 2.13.5 | strict request validation & error protocol |
 | tqdm | ≥ 4.65 | progress bars in long scripts |
-| pytest | 9.0.2 | test suite (31 tests) |
+| pytest | 9.0.2 | test suite (32 tests) |
 | Plotly.js | 2.27.0 (CDN) | interactive dashboard charts (gauge, SHAP, what-if) |
 
 ---
@@ -73,32 +73,38 @@ Exact versions from the executed environment (Table 4.1 of the dissertation);
 ```
 project-risk-dashboard/
 ├── README.md                  # this file
-├── TRUE_README.md             # deep-dive verification report (dissertation map)
+├── EVIDENCE_INTEGRATION_SUMMARY.md        # corrections log (thesis-facing numbers)
+├── EVIDENCE_INTEGRATION_CHAPTERS_1-3_CORRECTED.md  # ch.1-3 evidence + insert points
+├── RAW_DATA_SOURCE_REPORT.md  # raw WERS files, waves, merge rule, licence
 ├── LICENSE                    # MIT (code)
 ├── requirements.txt           # dependency ranges
 │
 ├── data/
-│   ├── wirsts10_july2014.csv        # raw WERS 2011 main survey (NOT in git — UKDA licence)
-│   ├── wirsts25_july2014.csv        # raw WERS 2011 panel file  (NOT in git — UKDA licence)
+│   ├── wirsts10_july2014.tab/.csv   # raw WERS time-series main survey (NOT in git — UKDA EUL)
+│   ├── wirsts25_july2014.tab/.csv   # raw WERS panel file            (NOT in git — UKDA EUL)
 │   └── processed/
-│       ├── wers2011_operational_risk_merged.csv   # analysis-ready dataset
-│       ├── wers2011_features_engineered.csv
+│       ├── wers_operational_risk_merged.csv   # analysis-ready dataset (14,448 × 53)
+│       ├── wers_panel_features_engineered.csv # exploratory matrix
 │       ├── dataset_metadata.json
 │       └── processing_summary.txt
 │
-├── scripts/                   # numbered pipeline (run in order)
-│   ├── 01_data_preparation.py        # merge, clean, build risk score/category
+├── ml_pipeline/                 # numbered pipeline (run in order)
+│   ├── 01_build_dataset.py                # merge waves, clean turnover, build target
 │   ├── 02_exploratory_analysis.py    # EDA report
-│   ├── 03_feature_engineering.py     # leakage-safe feature config
+│   ├── 03_feature_exploration.py     # EDA of leakage-safe predictors (RQ1)
 │   ├── 04_model_training.py          # 5 models + model_metadata.json
-│   ├── 04b_imbalance_tuning.py       # SMOTE / SMOTE-ENN / tuned / stacked
-│   ├── 05_model_evaluation.py        # metrics, confusion matrices, ROC
-│   ├── 06_shap_explanation.py        # global + local SHAP artefacts
-│   └── 07_factor_analysis.py         # HR-practice factor analysis
+│   ├── 05_imbalance_tuning.py       # SMOTE / SMOTE-ENN / tuned / stacked
+│   ├── 06_model_evaluation.py        # metrics, confusion matrices, ROC
+│   ├── 07_shap_explanation.py        # global + local SHAP artefacts
+│   ├── 08_factor_analysis.py         # HR-practice factor analysis
+│   ├── efa_tools.py                  # shared EFA fit/transform utilities
+│   └── research/
+│       ├── thesis_outputs.py         # thesis figures + tables
+│       └── system_tests.py           # ST1-ST19 evidence
 │
 ├── models/
 │   └── saved_models/                 # *.pkl produced locally (NOT in git)
-│       └── model_metadata.json       # best model, 36 features, metrics
+│       └── model_metadata.json       # best model, 37 features, metrics
 │
 ├── dashboard/
 │   ├── app.py                        # Flask app + REST API
@@ -140,11 +146,11 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-**Data:** the raw WERS 2011 files must be obtained separately from the
-[UK Data Archive](https://www.ukdataservice.ac.uk/) (Study 4511) under its
-End User Licence, then placed in `data/`. If `data/processed/` already contains
-`wers2011_operational_risk_merged.csv`, you can skip straight to
-[Running](#running-the-project).
+**Data:** the raw WERS time-series files (waves 1980–2011) must be obtained
+separately from the [UK Data Service](https://ukdataservice.ac.uk/) (Study 4511)
+under its End User Licence, then placed in `data/`. If
+`data/processed/` already contains `wers_operational_risk_merged.csv`, you can
+skip straight to [Running](#running-the-project).
 
 ---
 
@@ -153,16 +159,16 @@ End User Licence, then placed in `data/`. If `data/processed/` already contains
 ### Full pipeline (from raw data to dashboard)
 
 ```bash
-python ml_pipeline/01_data_preparation.py     # merge + risk score/category
-python ml_pipeline/02_exploratory_analysis.py  # EDA report
-python ml_pipeline/03_feature_engineering.py   # leakage-safe features
-python ml_pipeline/07_factor_analysis.py       # EFA (spec §3.7) — adds factor scores
-python ml_pipeline/04_model_training.py        # train 5 models + metadata (5-fold CV)
-python ml_pipeline/04b_imbalance_tuning.py     # SMOTE / SMOTE-ENN / tuned / stacked
-python ml_pipeline/05_model_evaluation.py      # metrics, CM, ROC
-python ml_pipeline/06_shap_explanation.py      # global + local SHAP
-python ml_pipeline/research/00_thesis_outputs.py  # thesis figures + tables
-python ml_pipeline/research/01_system_tests.py     # ST1-ST19 evidence
+python ml_pipeline/01_build_dataset.py             # merge waves + clean turnover band (target)
+python ml_pipeline/02_exploratory_analysis.py      # EDA report
+python ml_pipeline/03_feature_exploration.py       # EDA of leakage-safe predictors (RQ1)
+python ml_pipeline/04_model_training.py            # train 5 models + metadata (5-fold CV)
+python ml_pipeline/05_imbalance_tuning.py          # SMOTE / SMOTE-ENN / tuned / stacked
+python ml_pipeline/06_model_evaluation.py          # metrics, CM, ROC
+python ml_pipeline/07_shap_explanation.py          # global + local SHAP
+python ml_pipeline/08_factor_analysis.py           # EFA (spec §3.7) — adds factor scores
+python ml_pipeline/research/thesis_outputs.py      # thesis figures + tables
+python ml_pipeline/research/system_tests.py        # ST1-ST19 evidence
 ```
 
 ### Launch the dashboard
@@ -173,8 +179,8 @@ python dashboard/app.py
 ```
 
 Model binaries (`*.pkl`) are generated by step 04 and are not committed; a
-fresh clone must run the pipeline (at minimum steps 01 and 04) before the
-dashboard will start.
+fresh clone must run the pipeline (at minimum `01_build_dataset.py` and
+`04_model_training.py`) before the dashboard will start.
 
 ---
 
@@ -309,13 +315,13 @@ a prediction).
 ## System verification
 
 Beyond unit tests, a 19-point system-test plan (ST1–ST19) is executed against
-the deployed configuration (`python scripts/research/01_system_tests.py`) —
+the deployed configuration (`python ml_pipeline/research/system_tests.py`) —
 **19/19 passing** as of the latest run:
 
 | Group | Tests | Verifies |
 |---|---|---|
-| Data integrity | ST1–ST3 | dataset dimensions 6,635 × 52, class counts, 11 leakage exclusions |
-| Model | ST4–ST5 | best model loads (logreg, 36 features); probabilities sum to 1 |
+| Data integrity | ST1–ST3 | dataset dimensions 14,448 × 53, turnover class counts (5,077/621/687), 14 leakage exclusions |
+| Model | ST4–ST5 | best model loads (logreg, 37 features); probabilities sum to 1 |
 | Validation contract | ST6–ST13 | all 400-level codes: missing/empty/type/range/extra/null/malformed |
 | Resilience | ST14–ST16 | 422 model failure, 500 internal error, 429 rate limit + `Retry-After` |
 | Integration | ST17–ST19 | endpoint aliases, what-if baseline/scenario, NaN-free strict JSON |
@@ -336,8 +342,8 @@ chapter → artifact map with the executed numbers. Regenerate everything
 deterministically with:
 
 ```bash
-python scripts/research/00_thesis_outputs.py   # thesis figures + tables
-python scripts/research/01_system_tests.py     # ST1-ST19 evidence
+python ml_pipeline/research/thesis_outputs.py   # thesis figures + tables
+python ml_pipeline/research/system_tests.py     # ST1-ST19 evidence
 ```
 
 ---
@@ -346,7 +352,7 @@ python scripts/research/01_system_tests.py     # ST1-ST19 evidence
 
 | Symptom | Fix |
 |---|---|
-| `WARNING: model not trained yet` / dashboard starts but predicts fail | run `python scripts/01_data_preparation.py` then `python scripts/04_model_training.py` (the `.pkl` files are not committed) |
+| `WARNING: model not trained yet` / dashboard starts but predicts fail | run `python ml_pipeline/01_build_dataset.py` then `python ml_pipeline/04_model_training.py` (the `.pkl` files are not committed) |
 | `OSError: [Errno 98]` / address already in use | another process holds port 5000 — kill it or change the port in `dashboard/app.py` |
 | Charts render empty / no gauge | the frontend loads Plotly.js from a CDN — check internet access, or self-host the bundle |
 | `ModuleNotFoundError` in scripts | activate the environment installed via `pip install -r requirements.txt` |
@@ -356,13 +362,15 @@ python scripts/research/01_system_tests.py     # ST1-ST19 evidence
 
 ## Limitations & responsible use
 
-1. **High-risk scarcity.** 28 High observations (0.42 %) bound achievable
-   High-class recall; treat High predictions as triage signals, not ground truth.
+1. **High-risk scarcity.** Of 6,385 modelled rows, 687 (10.76 %) are High-risk
+   after turnover-band construction; Medium (621) is similarly scarce, so
+   minority-class recall is noisy — treat High predictions as triage signals,
+   not ground truth.
 2. **Associations ≠ causation.** The what-if simulator shows how the fitted
    model responds to input changes — it does not prove that changing an HR
    practice will change real-world risk. The UI states this explicitly.
-3. **Cross-sectional 2011 data.** Relationships may have drifted; retrain with
-   newer WERS waves before any operational use.
+3. **Multi-wave cross-sectional data (1980–2011).** Relationships may drift
+   between waves; retrain with newer WERS waves before any operational use.
 4. **Survey weights excluded.** `weight` is not a model feature; use weighted
    descriptive statistics for population-level claims.
 5. **Development server.** `dashboard/app.py` runs Flask's dev server — put a
@@ -392,14 +400,15 @@ size reasons).
 ## License & data acknowledgement
 
 - **Code:** released under the [MIT License](LICENSE).
-- **Data:** the Workplace Employment Relations Survey 2011 is provided by the
-  **UK Data Archive** (Study 4511) under its **End User Licence**. The raw
-  data files are excluded from this repository; you must register with the UK
-  Data Archive and accept the licence to obtain them. Do not redistribute the
-  raw or processed survey data with derived repositories.
-- WERS 2011 was funded by the UK Department for Business, Innovation and
-  Skills and conducted by the Institute for Employment Studies, the National
-  Institute of Economic and Social Research, and the Policy Studies Institute.
+- **Data:** the Workplace Employment Relations Survey time-series (waves
+  1980–2011) is provided by the **UK Data Service** (Study 4511) under its
+  **End User Licence (Safeguarded data)**. The raw data files are excluded
+  from this repository; you must register with the UK Data Service and accept
+  the licence to obtain them. Do not redistribute the raw or processed survey
+  data with derived repositories.
+- WERS was funded by the UK Department for Business, Innovation and Skills and
+  conducted by the Institute for Employment Studies, the National Institute of
+  Economic and Social Research, and the Policy Studies Institute.
 
 ---
 
@@ -408,13 +417,13 @@ size reasons).
 If you use this work, please cite:
 
 ```bibtex
-@mastersthesis{operational_risk_wers2011,
+@mastersthesis{operational_risk_wers,
   title  = {Predictive Modeling of Business Operational Risk Levels
             and an Interactive Web Dashboard},
   author = {Your Name},
   school = {Your Institution},
   year   = {2026},
-  note   = {WERS 2011, UK Data Archive Study 4511}
+  note   = {WERS/WIRS 1990-2011, UK Data Archive Study 4511}
 }
 ```
 

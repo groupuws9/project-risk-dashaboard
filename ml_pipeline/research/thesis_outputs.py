@@ -1,7 +1,7 @@
 """Generate all thesis (Chapters 4 & 5) figures and tables from real project data.
 
 Outputs -> research/figures/*.png and research/tables/*.csv|json|md
-Run:  python ml_pipeline/research/00_thesis_outputs.py
+Run:  python ml_pipeline/research/thesis_outputs.py
 """
 import json
 import sys
@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 
 BASE = Path(__file__).resolve().parents[2]
-DATA = BASE / "data" / "processed" / "wers2011_operational_risk_merged.csv"
+DATA = BASE / "data" / "processed" / "wers_operational_risk_merged.csv"
 RES = BASE / "results"
 FIG = BASE / "research" / "figures"
 TAB = BASE / "research" / "tables"
@@ -40,16 +40,20 @@ def save(fig, name):
 # ---------------------------------------------------------------- Ch4 figures
 print("== Chapter 4 figures ==")
 
-# Figure 4.1 – risk score histogram with thresholds
+# Figure 4.1 – turnover-rate distribution with target bands.
+# operational_risk_score is a retained alias of the sentinel-cleaned employee
+# turnover rate (the target basis), so it is plotted on its real 0-100 % scale
+# with the Low/Medium/High cut-points (10 %, 20 %) that define the target.
+_turn = df["operational_risk_score"].dropna()
+_turn = _turn[(_turn >= 0) & (_turn <= 100)]
 fig, ax = plt.subplots(figsize=(7, 4))
-ax.hist(df["operational_risk_score"], bins=50, color="#3498db",
-        edgecolor="black", alpha=0.8)
-ax.axvline(60, color="red", ls="--", lw=2, label="High threshold (60)")
-ax.axvline(35, color="orange", ls="--", lw=2, label="Medium threshold (35)")
-ax.set(xlabel="Operational risk score (0-100)", ylabel="Frequency",
-       title="Distribution of composite operational risk scores (n = 6,635)")
+ax.hist(_turn, bins=50, color="#3498db", edgecolor="black", alpha=0.8)
+ax.axvline(20, color="red", ls="--", lw=2, label="High threshold (20%)")
+ax.axvline(10, color="orange", ls="--", lw=2, label="Medium threshold (10%)")
+ax.set(xlabel="Employee turnover rate (%)", ylabel="Frequency",
+       title=f"Employee turnover rate — target basis (n = {len(_turn):,})")
 ax.legend()
-save(fig, "fig_4_1_risk_score_distribution.png")
+save(fig, "fig_4_1_turnover_distribution.png")
 
 # Figure 4.2 – class distribution bar + pie
 counts = df[TARGET].value_counts().reindex(["Low", "Medium", "High"])
@@ -59,7 +63,7 @@ bars = axes[0].bar(counts.index, counts.values, color=colors,
                    edgecolor="black", width=0.55)
 for b, v in zip(bars, counts.values):
     axes[0].text(b.get_x() + b.get_width() / 2, v + 60,
-                 f"{v:,}\n({v / len(df) * 100:.1f}%)",
+                 f"{v:,}\n({v / max(int(counts.sum()), 1) * 100:.1f}%)",
                  ha="center", fontsize=9, fontweight="bold")
 axes[0].set(ylabel="Observations", title="Class counts")
 axes[0].set_ylim(0, counts.max() * 1.25)
@@ -154,7 +158,10 @@ for ax, (m, nice) in zip(axes, NICE.items()):
     ax.set_yticks(range(3), cm.index)
     ax.set(xlabel="Predicted", ylabel="Actual", title=nice)
     ax.grid(False)
-fig.suptitle("Figure 5.3 – Confusion matrices (test set, n = 1,327)", y=1.04)
+_n_test = int(pd.read_csv(RES / "tables" / "confusion_matrix_logreg.csv",
+                          index_col=0).values.sum())
+fig.suptitle(f"Figure 5.3 – Confusion matrices (test set, n = {_n_test:,})",
+             y=1.04)
 save(fig, "fig_5_3_confusion_matrices.png")
 
 # Figure 5.4 – imbalance-handling strategies
@@ -198,7 +205,8 @@ for src_name, dst_name in [("shap_beeswarm.png", "fig_5_6_shap_beeswarm.png"),
 # ---------------------------------------------------------------- Tables
 print("== Thesis tables ==")
 
-# Use the feature list from model_metadata.json (40 features used in training)
+# Use the feature list from model_metadata.json (the exact features used in
+# training: 33 raw + 4 EFA factor scores = 37, leakage-excluded)
 META = BASE / "models" / "saved_models" / "model_metadata.json"
 if META.exists():
     meta = json.loads(META.read_text())
@@ -218,12 +226,13 @@ chars = pd.DataFrame({
     "Attribute": ["Unit of analysis", "Observations", "Total variables",
                   "Predictive features", "Target variable", "Target classes",
                   "Class balance (Low/Med/High)", "Imbalance ratio (Low:High)",
-                  "Missing values (predictors)", "Score range", "Year span"],
+                  "Missing values (predictors)", "Turnover rate range (%)",
+                  "Year span"],
     "Value": [
         "Workplace (organization)",
         f"{len(df):,}",
         f"{df.shape[1]}",
-        # The model was trained on 40 features (36 raw + 4 EFA factor scores)
+        # The model was trained on 37 features (33 raw + 4 EFA factor scores)
         f"{len(meta['features'])}",
         TARGET,
         "3 (Low / Medium / High)",
@@ -232,7 +241,7 @@ chars = pd.DataFrame({
         # factor_* scores are derived (not stored in the merged CSV); count only
         # the columns actually present in it
         f"{df[[c for c in meta['features'] if c in df.columns]].isna().sum().sum():,}",
-        "0 – 100",
+        f"{_turn.min():.1f} – {_turn.max():.1f}",
         f"{int(df['year'].min())} – {int(df['year'].max())}",
     ]})
 chars.to_csv(TAB / "table_3_2_dataset_characteristics.csv", index=False)
@@ -250,19 +259,26 @@ for p in pkgs:
     env_rows.append({"Package": p, "Version": v})
 pd.DataFrame(env_rows).to_csv(TAB / "table_4_1_environment.csv", index=False)
 
-# Table 4.2 – excluded (leakage) features
+# Table 4.2 – excluded (leakage / administrative) features.
+# Target is the turnover band, so every turnover-family and risk-indicator
+# column that feeds it is excluded, along with the duplicate-mapped predictors
+# (tprocgrv -> grievance_procedure_formal, ttrnprob -> training_problems /
+# skill_shortage_reported) and the retired composite alias.
 excl = pd.DataFrame([
-    ("operational_risk_score", "Composite target precursor — direct leakage"),
-    ("employee_turnover_rate", "Target dimension component (25 pts)"),
-    ("employee_turnover_rate_5yr", "Target dimension component (turnover)"),
-    ("absenteeism_rate", "Target dimension component (25 pts)"),
-    ("grievance_rate", "Target dimension component (25 pts)"),
-    ("disputes_raised", "Target dimension component (industrial action)"),
-    ("dispute_risk_level", "Target dimension component (industrial action)"),
-    ("dismissal_rate", "Target dimension component (industrial action)"),
-    ("disciplinary_warnings", "Target dimension component (industrial action)"),
-    ("suspensions", "Target dimension component (industrial action)"),
-    ("other_industrial_action", "Target dimension component (industrial action)"),
+    ("employee_turnover_rate", "Target basis — turnover band derived from it"),
+    ("operational_risk_score", "Alias of turnover rate — direct leakage"),
+    ("employee_turnover_rate_5yr", "Turnover measure — target family"),
+    ("absenteeism_rate", "Risk indicator — excluded (not a predictor)"),
+    ("grievance_rate", "Risk indicator (tprocgrv) — excluded"),
+    ("grievance_procedure_formal", "Duplicate of tprocgrv — leakage"),
+    ("training_problems", "Duplicate of ttrnprob — leakage"),
+    ("skill_shortage_reported", "Duplicate of ttrnprob — leakage"),
+    ("disputes_raised", "Risk indicator (industrial action) — excluded"),
+    ("dispute_risk_level", "Risk indicator (industrial action) — excluded"),
+    ("other_industrial_action", "Risk indicator (industrial action) — excluded"),
+    ("dismissal_rate", "Risk indicator (industrial action) — excluded"),
+    ("disciplinary_warnings", "Risk indicator (industrial action) — excluded"),
+    ("suspensions", "Risk indicator (industrial action) — excluded"),
     ("serno", "Survey identifier — non-predictive"),
     ("year", "Survey wave identifier — administrative"),
     ("weight", "Survey sampling weight — administrative"),
@@ -305,13 +321,16 @@ mc[~mc["model"].isin(NICE)].to_csv(
     TAB / "table_5_12_imbalance_strategies.csv", index=False)
 
 # Dataset characteristics JSON (machine-readable)
+_n_valid = int(counts.sum())
 meta = {
     "n_observations": int(len(df)),
     "n_variables": int(df.shape[1]),
+    "n_target_valid": _n_valid,
     "n_predictive_features": int(len(predictors)),
     "target": TARGET,
     "class_counts": {k: int(v) for k, v in counts.items()},
-    "class_pct": {k: round(v / len(df) * 100, 2) for k, v in counts.items()},
+    "class_pct": {k: round(v / max(_n_valid, 1) * 100, 2)
+                  for k, v in counts.items()},
     "imbalance_ratio": round(counts["Low"] / max(counts["High"], 1), 1),
 }
 (TAB / "dataset_characteristics.json").write_text(json.dumps(meta, indent=2))

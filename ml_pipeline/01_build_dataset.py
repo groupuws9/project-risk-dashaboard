@@ -1,4 +1,4 @@
-"""merge_tools.py — single source of truth for building the WERS/WIRS dataset.
+"""01_build_dataset.py — single source of truth for building the WERS/WIRS dataset.
 
 Why this module exists
 ----------------------
@@ -299,7 +299,7 @@ def write(merged, verbose=True):
         "- Licence: UK Data Service End User Licence (Safeguarded data)",
         f"- Output File: {OUT_CSV.name}",
         "",
-        "Merge rule (ml_pipeline/merge_tools.py):",
+        "Merge rule (ml_pipeline/01_build_dataset.py):",
         f"- {MAIN_FILE.name}: main workplace survey, waves 1998/2004/2011",
         f"- {PANEL_FILE.name}: panel file, waves 1980-2011",
         "- merged = all main-survey rows + early-wave panel rows (no serno-year overlap)",
@@ -330,7 +330,7 @@ def write(merged, verbose=True):
         f"- Mapped leakage-safe predictors: {len(predictor_columns())}",
         "- 04_model_training.py drops 2 high-cardinality SIC codes "
         "(industry_code, industry_code_80) -> 33 raw inputs",
-        "- Plus 4 EFA factor scores (07_factor_analysis.py) = 37 model inputs",
+        "- Plus 4 EFA factor scores (08_factor_analysis.py) = 37 model inputs",
         f"- Leakage-excluded columns: {len(LEAKAGE)}",
         "- Identifiers excluded: serno, year, weight",
         "",
@@ -346,7 +346,7 @@ def write(merged, verbose=True):
         "",
         "Next Steps:",
         "1. Exploratory analysis: python ml_pipeline/02_exploratory_analysis.py",
-        "2. Feature engineering: python ml_pipeline/03_feature_engineering.py",
+        "2. Feature engineering: python ml_pipeline/03_feature_exploration.py",
         "3. Model training: python ml_pipeline/04_model_training.py",
         "4. Dashboard: python dashboard/app.py",
         "",

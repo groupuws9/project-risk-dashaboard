@@ -1,4 +1,4 @@
-"""05_model_evaluation.py — Deep evaluation of trained models (RO2/RQ3)."""
+"""06_model_evaluation.py — Deep evaluation of trained models (RO2/RQ3)."""
 from pathlib import Path
 import json
 import sys
@@ -17,7 +17,7 @@ MODEL_DIR = BASE / "models" / "saved_models"
 TAB_DIR = BASE / "results" / "tables"
 FIG_DIR = BASE / "results" / "figures"
 REP_DIR = BASE / "results" / "evaluation_reports"
-DATA = BASE / "data" / "processed" / "wers2011_operational_risk_merged.csv"
+DATA = BASE / "data" / "processed" / "wers_operational_risk_merged.csv"
 for d in (TAB_DIR, FIG_DIR, REP_DIR):
     d.mkdir(parents=True, exist_ok=True)
 
@@ -150,7 +150,7 @@ else:
 res.to_csv(TAB_DIR / "evaluation_summary.csv", index=False)
 res.to_csv(REP_DIR / "evaluation_summary.csv", index=False)
 
-md = ["# Model Evaluation Report — WERS 2011 Operational Risk", "",
+md = ["# Model Evaluation Report — WIRS/WERS Workplace-Panel Operational Risk (turnover-based)", "",
       f"Best model (training): **{META['best_model']}**", "",
       "## Test metrics (held-out 20%, stratified)", ""]
 if not res.empty:

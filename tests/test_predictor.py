@@ -17,10 +17,17 @@ _ORG = {"sector": "1", "org_size_category_3": "2", "multinational": "2",
 def test_load_best_model():
     p = OperationalRiskPredictor.load()
     assert p.labels == ["Low", "Medium", "High"]
-    # 36 raw HR/org features + 4 EFA factor scores (spec 1 §3.7)
-    assert len(p.features) == 40
-    assert [f for f in p.features if f.startswith("factor_")] == [
-        "factor_1", "factor_2", "factor_3", "factor_4"]
+    # Feature count is defined by the trained model contract
+    # (models/saved_models/model_metadata.json): 33 leakage-free raw HR/org/ER
+    # predictors + 4 EFA factor scores derived at inference. Assert the contract
+    # structurally rather than a hard-coded number so the test tracks the model.
+    factors = [f for f in p.features if f.startswith("factor_")]
+    raw = [f for f in p.features if not f.startswith("factor_")]
+    assert factors == ["factor_1", "factor_2", "factor_3", "factor_4"]
+    assert len(raw) == 33
+    assert len(p.features) == len(raw) + len(factors)
+    # The target basis (turnover) must never be an input feature.
+    assert "employee_turnover_rate" not in p.features
 
 
 def test_factor_scores_derived_at_inference():

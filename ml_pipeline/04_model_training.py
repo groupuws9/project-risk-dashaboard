@@ -37,7 +37,7 @@ except Exception:
     HAS_LGBM = False
 
 BASE = Path(__file__).resolve().parent.parent
-DATA = BASE / "data" / "processed" / "wers2011_operational_risk_merged.csv"
+DATA = BASE / "data" / "processed" / "wers_operational_risk_merged.csv"
 META_JSON = BASE / "data" / "processed" / "dataset_metadata.json"
 MODEL_DIR = BASE / "models" / "saved_models"
 TABLE_DIR = BASE / "results" / "tables"
@@ -49,9 +49,14 @@ FIG_DIR.mkdir(parents=True, exist_ok=True)
 TARGET = "operational_risk_category"
 SCORE_COL = "operational_risk_score"
 ID_COLS = ["serno", "year", "weight"]
-# Leakage columns: raw risk indicators that CONSTRUCT the target score.
+# Leakage columns. The target is now the employee-turnover band derived from
+# ``tempc`` (see 01_build_dataset.py), so the turnover rate itself plus the other raw
+# risk indicators, the two duplicate-derived predictors (tprocgrv ->
+# grievance_procedure_formal; ttrnprob -> training_problems /
+# skill_shortage_reported) and the retired composite score are all excluded.
 LEAKAGE = ["employee_turnover_rate", "employee_turnover_rate_5yr",
-    "absenteeism_rate", "grievance_rate", "disputes_raised",
+    "absenteeism_rate", "grievance_rate", "grievance_procedure_formal",
+    "training_problems", "skill_shortage_reported", "disputes_raised",
     "dispute_risk_level", "other_industrial_action", "dismissal_rate",
     "disciplinary_warnings", "suspensions", SCORE_COL]
 LABELS = ["Low", "Medium", "High"]
@@ -59,27 +64,37 @@ RANDOM_STATE = 42
 N_SPLITS = 5           # stratified k-fold CV folds (spec 3.4)
 
 print("=" * 78)
-print("MODEL TRAINING — WERS 2011 operational risk (Low/Medium/High)")
+print("MODEL TRAINING — WERS/WIRS workplace operational risk (Low/Medium/High)")
+print("Target = employee turnover band (tempc), sentinel-cleaned")
 print("=" * 78)
 
 df = pd.read_csv(DATA)
 print(f"Loaded {df.shape[0]:,} rows x {df.shape[1]} cols")
 print(df[TARGET].value_counts().to_string())
 
-# ---- feature list: org + HR + ER + labour (no leakage, no IDs/target) ----
+# ---- feature list: leakage-safe predictor columns from 01_build_dataset ----
+# Prefer the single-source-of-truth predictor contract written by
+# 01_build_dataset.build() into dataset_metadata.json. Those columns are already
+# verified leakage-free (raw risk indicators, the two tprocgrv/ttrnprob
+# duplicates and the score are excluded there). Fall back to a column filter
+# only if the metadata is absent.
 if META_JSON.exists():
     meta = json.loads(META_JSON.read_text())
-    cats = meta["variable_categories"]
-    feats = (cats["organizational"] + cats["hr_practices"]
-             + cats["employee_relations"] + cats["labor_market"])
+    feats = [c for c in meta.get("predictor_columns", []) if c in df.columns]
 else:
     feats = [c for c in df.columns if c not in ID_COLS + LEAKAGE + [TARGET]]
-feats = [c for c in feats if c in df.columns]
+# Fail fast if any target-derived / duplicate-derived column leaked in.
+_leak_set = set(LEAKAGE) | set(meta.get("leakage_excluded", [])) if META_JSON.exists() else set(LEAKAGE)
+assert not (set(feats) & _leak_set), (
+    f"leakage columns present in features: {set(feats) & _leak_set}")
+assert len(feats) == len(set(feats)), "duplicate feature names detected"
 # Drop ultra-high-cardinality raw SIC codes (500+/200+ levels -> huge one-hot);
 # sector_detailed retains industry signal at tractable dimensionality.
 for _drop in ("industry_code", "industry_code_80"):
     if _drop in feats:
         feats.remove(_drop)
+print(f"Verified {len(feats)} unique leakage-free predictors")
+
 
 # ---- EFA factor scores (spec 1 §3.7): latent HR-practice constructs --------
 # Deterministic full-sample EFA over the 16 HR/ER practice items (union
@@ -200,9 +215,22 @@ for name, est in build_models().items():
                      zero_division=0, output_dict=True),
                  "confusion_matrix": confusion_matrix(yte, pred).tolist()}}
 
-best_name = max(results, key=lambda k: results[k]["test"]["balanced_accuracy"])
-print(f"\n>>> BEST: {best_name} "
-      f"(bal_acc={results[best_name]['test']['balanced_accuracy']:.3f})")
+# Model selection is driven by cross-validated balanced accuracy on the
+# TRAINING set only. The held-out test set is never used to choose a model —
+# it is reserved for the single final evaluation (reviewer Fix 3). Models that
+# produced no finite CV score are not eligible for selection.
+valid_models = {n: r for n, r in results.items()
+                if np.isfinite(r["cv"].get("test_balanced_accuracy", np.nan))}
+if not valid_models:
+    raise RuntimeError(
+        "No model has a valid cross-validated balanced-accuracy score.")
+best_name = max(valid_models,
+                key=lambda n: valid_models[n]["cv"]["test_balanced_accuracy"])
+print(f"\n>>> BEST (by training CV balanced accuracy): {best_name} "
+      f"(cv_bal_acc={valid_models[best_name]['cv']['test_balanced_accuracy']:.3f})")
+print(f"    held-out test bal_acc (reported, not used for selection): "
+      f"{results[best_name]['test']['balanced_accuracy']:.3f}")
+
 
 
 for name, pipe in fitted.items():
@@ -259,5 +287,5 @@ try:
         print("Saved results/figures/feature_importance.png")
 except Exception as e:
     print(f"Importance export skipped: {e}")
-print("\nDONE. Next: python 05_model_evaluation.py")
+print("\nDONE. Next: python 06_model_evaluation.py")
 

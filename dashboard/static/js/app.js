@@ -674,8 +674,9 @@ function renderWhatIf(j, base, alt) {
       "<tbody>" + rows + "</tbody></table>" +
       "<div id='whatif-chart' style='height:280px;margin-top:12px'></div>" +
       "<p class='hint'>Note: results are model-learned statistical associations from " +
-      "WERS 2011 (logistic regression, balanced accuracy 0.550) — not causal effects. " +
-      "P(High) may remain near zero for most inputs (28 High observations in training).</p></div>" +
+      "WERS/WIRS (logistic regression, balanced accuracy 0.389 held-out / 0.385 CV) — " +
+      "not causal effects. P(High) stays low for most inputs (550 High observations " +
+      "in training), so treat High as a triage signal.</p></div>" +
     whatIfDiff(base, alt);
 
   const colors = {Low: "#4ade80", Medium: "#facc15", High: "#f87171"};

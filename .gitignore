@@ -19,6 +19,9 @@ results/
 scripts/*_log.txt
 scripts/*_err.txt
 
+# Pipeline run logs / throwaway probes (transient, never committed)
+run_logs/
+
 # OS / IDE / tooling
 .DS_Store
 .vscode/

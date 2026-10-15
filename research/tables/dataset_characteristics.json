@@ -1,17 +1,18 @@
 {
-  "n_observations": 6635,
-  "n_variables": 52,
-  "n_predictive_features": 40,
+  "n_observations": 14448,
+  "n_variables": 53,
+  "n_target_valid": 6385,
+  "n_predictive_features": 37,
   "target": "operational_risk_category",
   "class_counts": {
-    "Low": 5502,
-    "Medium": 1105,
-    "High": 28
+    "Low": 5077,
+    "Medium": 621,
+    "High": 687
   },
   "class_pct": {
-    "Low": 82.92,
-    "Medium": 16.65,
-    "High": 0.42
+    "Low": 79.51,
+    "Medium": 9.73,
+    "High": 10.76
   },
-  "imbalance_ratio": 196.5
+  "imbalance_ratio": 7.4
 }

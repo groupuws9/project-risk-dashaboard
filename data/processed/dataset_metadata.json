@@ -1,78 +1,87 @@
 {
-  "dataset_name": "WERS 2011 Operational Risk Dataset",
-  "source": "UKDA Study 4511 - WERS 2011",
-  "date_created": "2026-10-05 17:11:01",
-  "n_observations": 6635,
-  "n_variables": 52,
+  "dataset_name": "WERS/WIRS Operational Risk Dataset (turnover-based)",
+  "source": "UKDA Study 4511 - Workplace Employment Relations Study time-series (wirsts10 + wirsts25)",
+  "licence": "UK Data Service End User Licence - Safeguarded Data",
+  "waves": {
+    "1980": 2040,
+    "1984": 2019,
+    "1990": 2061,
+    "1991": 1693,
+    "1998": 2191,
+    "2004": 2062,
+    "2011": 2382
+  },
+  "n_observations": 14448,
+  "n_variables": 53,
   "target_variable": "operational_risk_category",
-  "risk_score_variable": "operational_risk_score",
-  "variable_categories": {
-    "identifiers": [
-      "serno",
-      "year",
-      "weight"
-    ],
-    "risk_indicators": [
-      "employee_turnover_rate",
-      "employee_turnover_rate_5yr",
-      "absenteeism_rate",
-      "grievance_rate",
-      "disputes_raised",
-      "dispute_risk_level",
-      "other_industrial_action",
-      "dismissal_rate",
-      "disciplinary_warnings",
-      "suspensions"
-    ],
-    "organizational": [
-      "org_size_category",
-      "org_size_category_3",
-      "org_size_category_4",
-      "sector",
-      "sector_detailed",
-      "industry_code",
-      "industry_code_80",
-      "multinational",
-      "org_age_years",
-      "workplace_age",
-      "trading_status"
-    ],
-    "hr_practices": [
-      "union_coverage_pct",
-      "union_coverage_pct_6",
-      "union_coverage_pct_7",
-      "collective_bargaining",
-      "bargaining_level_org",
-      "bargaining_level_est",
-      "formal_hr_strategy",
-      "performance_appraisal_pct",
-      "training_budget_exists",
-      "training_problems",
-      "job_security_policy"
-    ],
-    "employee_relations": [
-      "jcc_exists",
-      "jcc_frequency",
-      "jcc_function",
-      "jcc_union_chair",
-      "information_sharing_score",
-      "info_chain_exist",
-      "newsletter_exists",
-      "investment_plans_shared",
-      "consultation_depth",
-      "employee_voice_channels",
-      "grievance_procedure_formal"
-    ],
-    "labor_market": [
-      "pct_part_time",
-      "pct_part_time_12",
-      "pct_female",
-      "pct_temporary",
-      "skill_shortage_reported"
-    ],
-    "derived": [
-      "operational_risk_score",
-      "operational_risk_category"
-    ]
-  }
+  "target_basis": "employee turnover rate (tempc), sentinel-cleaned",
+  "target_bands": {
+    "Low": "<=10%",
+    "Medium": "10-20%",
+    "High": ">20%"
+  },
+  "target_available_rows": 6385,
+  "class_counts": {
+    "Low": 5077,
+    "High": 687,
+    "Medium": 621
+  },
+  "class_pct": {
+    "Low": 79.51,
+    "High": 10.76,
+    "Medium": 9.73
+  },
+  "predictor_columns": [
+    "org_size_category",
+    "org_size_category_3",
+    "org_size_category_4",
+    "sector",
+    "sector_detailed",
+    "industry_code",
+    "industry_code_80",
+    "multinational",
+    "org_age_years",
+    "workplace_age",
+    "trading_status",
+    "union_coverage_pct",
+    "union_coverage_pct_6",
+    "union_coverage_pct_7",
+    "collective_bargaining",
+    "bargaining_level_org",
+    "bargaining_level_est",
+    "formal_hr_strategy",
+    "performance_appraisal_pct",
+    "training_budget_exists",
+    "job_security_policy",
+    "jcc_exists",
+    "jcc_frequency",
+    "jcc_function",
+    "jcc_union_chair",
+    "information_sharing_score",
+    "info_chain_exist",
+    "newsletter_exists",
+    "investment_plans_shared",
+    "consultation_depth",
+    "employee_voice_channels",
+    "pct_part_time",
+    "pct_part_time_12",
+    "pct_female",
+    "pct_temporary"
+  ],
+  "leakage_excluded": [
+    "employee_turnover_rate",
+    "employee_turnover_rate_5yr",
+    "absenteeism_rate",
+    "grievance_rate",
+    "grievance_procedure_formal",
+    "training_problems",
+    "skill_shortage_reported",
+    "disputes_raised",
+    "dispute_risk_level",
+    "other_industrial_action",
+    "dismissal_rate",
+    "disciplinary_warnings",
+    "suspensions",
+    "operational_risk_score"
+  ]
 }

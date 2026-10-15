@@ -1,50 +1,59 @@
 
-WERS 2011 OPERATIONAL RISK DATASET - PROCESSING SUMMARY
+WERS/WIRS OPERATIONAL RISK DATASET - PROCESSING SUMMARY
 ================================================================================
 
 Dataset Information:
-- Source: UKDA Study 4511 (WERS 2011)
-- Processing Date: 2026-10-05 17:11:01
-- Output File: wers2011_operational_risk_merged.csv
+- Source: UKDA Study 4511 - WERS time-series (wirsts10 + wirsts25)
+- Licence: UK Data Service End User Licence (Safeguarded data)
+- Output File: wers_operational_risk_merged.csv
+
+Merge rule (ml_pipeline/01_build_dataset.py):
+- wirsts10_july2014.tab: main workplace survey, waves 1998/2004/2011
+- wirsts25_july2014.tab: panel file, waves 1980-2011
+- merged = all main-survey rows + early-wave panel rows (no serno-year overlap)
 
 Dimensions:
-- Total Observations: 6,635
-- Total Variables: 52
+- Total Observations: 14,448
+- Total Variables: 53
+- Survey waves: 7 (1980-2011)
 
-Target Variable Distribution (Risk Categories):
-operational_risk_category
-Low       5502
-Medium    1105
-High        28
+Target Variable:
+- operational_risk_category (employee turnover band)
+- Basis: employee_turnover_rate (tempc), sentinel-cleaned
+- Bands: Low <=10%, Medium 10-20%, High >20%
+- Rows with an observed target: 6,385 of 14,448
 
-Risk Score Statistics:
-- Mean: 20.20
-- Median: 15.00
-- Std Dev: 10.35
-- Min: 10.00
-- Max: 80.00
+Target Variable Distribution:
+Low       5,077
+High      687
+Medium    621
 
-Variable Categories:
-- Identifiers: 3 variables
-- Risk Indicators: 10 variables
-- Organizational: 11 variables
-- HR Practices: 11 variables
-- Employee Relations: 11 variables
-- Labor Market: 5 variables
-- Derived Variables: 2 (risk score and category)
+Turnover Rate Statistics (%, cleaned):
+- Mean: 7.51
+- Median: 1.90
+- Min: 0.00
+- Max: 100.00
+
+Feature Contract:
+- Mapped leakage-safe predictors: 35
+- 04_model_training.py drops 2 high-cardinality SIC codes (industry_code, industry_code_80) -> 33 raw inputs
+- Plus 4 EFA factor scores (08_factor_analysis.py) = 37 model inputs
+- Leakage-excluded columns: 14
+- Identifiers excluded: serno, year, weight
 
 Data Quality:
-- Duplicate Rows: 0
-- Variables with Missing Values: 0
+- Duplicate serno-year rows: 0
+- Predictors with missing values: 0
 
 Files Created:
-1. wers2011_operational_risk_merged.csv - Main dataset
-2. dataset_metadata.json - Metadata and variable information
-3. processing_summary.txt - This summary report
+1. wers_operational_risk_merged.csv - analysis-ready dataset
+2. dataset_metadata.json - machine-readable metadata + feature contract
+3. processing_summary.txt - this summary report
 
 Next Steps:
-1. Run exploratory data analysis: python 02_exploratory_analysis.py
-2. Train predictive models: python 04_model_training.py
-3. Launch dashboard: python ../dashboard/app.py
+1. Exploratory analysis: python ml_pipeline/02_exploratory_analysis.py
+2. Feature engineering: python ml_pipeline/03_feature_exploration.py
+3. Model training: python ml_pipeline/04_model_training.py
+4. Dashboard: python dashboard/app.py
 
 ================================================================================

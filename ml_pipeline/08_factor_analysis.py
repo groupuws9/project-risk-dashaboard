@@ -1,4 +1,4 @@
-"""07_factor_analysis.py — Exploratory Factor Analysis of HR practices
+"""08_factor_analysis.py — Exploratory Factor Analysis of HR practices
 (spec 1 §3.7).
 
 Checks sampling adequacy (Bartlett + KMO), extracts factors with principal
@@ -28,7 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import efa_tools  # noqa: E402
 
 BASE = Path(__file__).resolve().parent.parent
-DATA = BASE / "data" / "processed" / "wers2011_operational_risk_merged.csv"
+DATA = BASE / "data" / "processed" / "wers_operational_risk_merged.csv"
 TAB = BASE / "results" / "tables"
 FEAT = BASE / "results" / "features"
 FIG = BASE / "results" / "figures"
@@ -69,7 +69,7 @@ plt.plot(range(1, p + 1), pa["thresholds"], "s--", color="darkorange",
 plt.axhline(1, ls=":", c="grey", lw=1)
 plt.xlabel("Factor number")
 plt.ylabel("Eigenvalue")
-plt.title("Scree plot — HR practice items (WERS 2011)")
+plt.title("Scree plot — HR practice items (WIRS/WERS panel 1980-2011)")
 plt.legend()
 plt.grid(alpha=0.3)
 plt.tight_layout()
@@ -94,7 +94,7 @@ efa_tools.save(artifact, FEAT / "factor_scoring.json")
 efa_tools.save(artifact, MODEL_DIR / "factor_scoring.json")
 
 strong = loadings.abs() > 0.40
-report = f"""Factor Analysis Report — WERS 2011 HR practices
+report = f"""Factor Analysis Report — WIRS/WERS workplace-panel HR practices (1980-2011)
 {'=' * 60}
 Items: {p}  |  N: {n}
 Bartlett test: chi2={artifact['bartlett_chi2']:.2f}, df={artifact['bartlett_df']}, p={artifact['bartlett_p']:.3e}
