@@ -1,0 +1,9 @@
+Error Code,HTTP Status,Description,Trigger Condition
+MISSING_FIELD,400,Required field absent or null,Required field missing from payload
+INVALID_TYPE,400,Value cannot be coerced to declared type,Wrong data type for field
+OUT_OF_RANGE,400,Value outside allowed domain,Value exceeds ge/le constraints
+MALFORMED_JSON,400,Body is not valid JSON object,Invalid JSON syntax or non-object body
+MODEL_ERROR,422,Model inference failed,Incomplete feature vector or NaN in prediction
+INTERNAL_ERROR,500,Unexpected server failure,Unhandled exception in server
+RATE_LIMITED,429,Too many requests from IP,Exceeds rate limit (default 120/60s)
+SERVICE_UNAVAILABLE,503,Model or dataset not loaded,Required resources unavailable

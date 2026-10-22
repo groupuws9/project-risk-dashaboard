@@ -184,4 +184,7 @@ def test_data_endpoints(client):
 def test_index_renders(client):
     r = client.get("/")
     assert r.status_code == 200
-    assert b"Operational Risk" in r.data
+    # The dashboard is titled "Business Risk Dashboard"; assert on the content
+    # the template actually renders rather than a stale product name.
+    assert b"Business Risk Dashboard" in r.data
+    assert b"Predict Low / Medium / High risk" in r.data

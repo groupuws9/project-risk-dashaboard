@@ -1,0 +1,8 @@
+Metric,Formula,Use Case,Interpretation
+Accuracy,(TP + TN) / (TP + TN + FP + FN),Overall correctness,Misleading under imbalance
+Balanced Accuracy,(Recall_Low + Recall_Med + Recall_High) / 3,Class-imbalanced data,Primary selection metric
+Macro-F1,2 × (Precision × Recall) / (Precision + Recall) averaged across classes,Harmonic mean of precision/recall,Secondary metric
+ROC-AUC (OvR),Area under ROC curve (one-vs-rest),Threshold-independent evaluation,Model discrimination
+Confusion Matrix,Actual vs Predicted counts,Per-class error analysis,Detailed performance view
+Precision,TP / (TP + FP),Positive predictive value,Minimize false positives
+Recall,TP / (TP + FN),True positive rate,Minimize false negatives

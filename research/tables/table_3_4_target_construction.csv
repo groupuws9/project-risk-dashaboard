@@ -1,0 +1,11 @@
+Step,Description,Implementation,Value/Range
+1,Source Variable,Employee turnover rate (tempc),Continuous percentage 0-100
+2,Sentinel Cleaning,Map UKDS missing codes to NaN,Values in [999, 9999.99, 99999, -9, -8] → NaN
+3,Range Validation,Reject impossible rates,Values < 0 or > 100 → NaN
+4,Low Class,Turnover ≤ 10%,Label: "Low"
+5,Medium Class,10% < Turnover ≤ 20%,Label: "Medium"
+6,High Class,Turnover > 20%,Label: "High"
+7,Missing Target,Rows without observed turnover,Excluded from training (kept for EDA)
+8,Target Variable Name,operational_risk_category,Categorical with 3 classes
+9,Modelled Rows,Rows with valid turnover rate,6,385 of 14,448 total
+10,Waves with Target,Turnover measured in,1998, 2004, 2011 only

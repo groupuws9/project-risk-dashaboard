@@ -1,0 +1,11 @@
+Test Case,Input Variation,Prediction Change,Expected Behavior,Status
+Same Input (Repeated),Identical payload,Identical prediction,Deterministic output,PASS
+Null Optional Field,pct_female=None vs pct_female=50.0,Minor probability shift,Median imputation applied,PASS
+Small Numeric Change,union_coverage_pct=50.0 vs 50.1,Negligible change (<0.01),Continuous feature stability,PASS
+Category Change,sector=1 vs sector=2,Potential class change,Categorical feature impact,PASS
+Multiple Changes,3 fields varied,Proportional probability shift,Feature combination effect,PASS
+Edge Case (Min),union_coverage_pct=0.0,Valid prediction,Boundary value handling,PASS
+Edge Case (Max),union_coverage_pct=100.0,Valid prediction,Boundary value handling,PASS
+Missing Required,union_coverage_pct omitted,Error 400,Validation enforced,PASS
+Type Mismatch,sector="1" (string) vs 1 (int),Error 400,Type validation enforced,PASS
+Out of Range,union_coverage_pct=150,Error 400,Range validation enforced,PASS

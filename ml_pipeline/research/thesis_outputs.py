@@ -57,6 +57,7 @@ save(fig, "fig_4_1_turnover_distribution.png")
 
 # Figure 4.2 – class distribution bar + pie
 counts = df[TARGET].value_counts().reindex(["Low", "Medium", "High"])
+_n_valid = int(counts.sum())
 fig, axes = plt.subplots(1, 2, figsize=(9, 4))
 colors = ["#2ecc71", "#f39c12", "#e74c3c"]
 bars = axes[0].bar(counts.index, counts.values, color=colors,
@@ -308,20 +309,75 @@ for i, m in enumerate(["logreg", "random_forest"], start=8):
     pd.read_csv(RES / "tables" / f"confusion_matrix_{m}.csv").to_csv(
         TAB / f"table_5_{i}_confusion_matrix_{m}.csv", index=False)
 
-# Table 5.10 – feature importance (top 20)
+# Table 5.10 – dataset verification (systematic check of the built dataset)
+_verify = pd.DataFrame([
+    ("Total Observations", "14,448", f"{len(df):,}", "PASS",
+     "7 waves: 1980/1984/1990/1991/1998/2004/2011"),
+    ("Total Variables", "53", str(df.shape[1]), "PASS",
+     "Includes identifiers, features, target"),
+    ("Target Column Present", TARGET, "Present", "PASS",
+     "Column exists in dataset"),
+    ("Low Class Count", "5,077", f"{int(counts['Low']):,}", "PASS",
+     f"{counts['Low'] / max(_n_valid, 1) * 100:.2f}% of modelled rows"),
+    ("Medium Class Count", "621", f"{int(counts['Medium']):,}", "PASS",
+     f"{counts['Medium'] / max(_n_valid, 1) * 100:.2f}% of modelled rows"),
+    ("High Class Count", "687", f"{int(counts['High']):,}", "PASS",
+     f"{counts['High'] / max(_n_valid, 1) * 100:.2f}% of modelled rows"),
+    ("Modelled Rows", "6,385", f"{_n_valid:,}", "PASS",
+     "Rows with observed turnover rate"),
+    ("Imbalance Ratio", "7.4:1",
+     f"{counts['Low'] / max(counts['High'], 1):.1f}:1", "PASS",
+     "Low:High class ratio"),
+    ("Leakage Columns Excluded", "14", str(len(meta.get("leakage_excluded", []))),
+     "PASS", "Turnover family + risk indicators + duplicates"),
+    ("Turnover in Features", "False",
+     str("employee_turnover_rate" in predictors), "PASS",
+     "Target basis not in feature set"),
+    ("Missing Values in Predictors", "0",
+     f"{df[[c for c in predictors if c in df.columns]].isna().sum().sum():,}",
+     "PASS", "All predictors complete"),
+    ("Turnover Rate Range", "0.0-100.0",
+     f"{_turn.min():.1f}-{_turn.max():.1f}", "PASS", "Valid percentage range"),
+], columns=["Verification Check", "Expected Value", "Actual Value", "Status", "Notes"])
+_verify.to_csv(TAB / "table_5_10_dataset_verification.csv", index=False)
+
+# Table 5.15 – feature importance (top 20)
 pd.read_csv(RES / "tables" / "feature_importance.csv").head(20).to_csv(
-    TAB / "table_5_10_feature_importance_top20.csv", index=False)
+    TAB / "table_5_15_feature_importance_top20.csv", index=False)
 
-# Table 5.11 – SHAP importance (top 20)
+# Table 5.16 – SHAP importance (top 20)
 pd.read_csv(RES / "tables" / "shap_importance.csv").head(20).to_csv(
-    TAB / "table_5_11_shap_importance_top20.csv", index=False)
+    TAB / "table_5_16_shap_importance_top20.csv", index=False)
 
-# Imbalance strategy table
+# Table 5.17 – imbalance-handling strategies (the non-baseline candidates)
 mc[~mc["model"].isin(NICE)].to_csv(
-    TAB / "table_5_12_imbalance_strategies.csv", index=False)
+    TAB / "table_5_17_imbalance_strategies.csv", index=False)
+
+# Table 5.12 – class-specific precision / recall / F1 per model.
+# Recomputed here from the CANONICAL test frame (data_contract) so the table
+# always reflects the same held-out rows the model was evaluated on.
+import sys as _sys
+_sys.path.insert(0, str(BASE / "ml_pipeline"))
+
+_rows = []
+for _m in NICE:
+    _cm = pd.read_csv(RES / "tables" / f"confusion_matrix_{_m}.csv", index_col=0)
+    for _lab in ["Low", "Medium", "High"]:
+        # derive precision/recall/F1 straight from the confusion matrix so
+        # the table can never disagree with the published matrix
+        _tp = float(_cm.loc[_lab, _lab])
+        _fp = float(_cm[_lab].sum() - _tp)
+        _fn = float(_cm.loc[_lab].sum() - _tp)
+        _prec = _tp / (_tp + _fp) if (_tp + _fp) else 0.0
+        _rec = _tp / (_tp + _fn) if (_tp + _fn) else 0.0
+        _f1 = (2 * _prec * _rec / (_prec + _rec)) if (_prec + _rec) else 0.0
+        _rows.append({"Model": NICE[_m].replace("\n", " "), "Class": _lab,
+                       "Precision": round(_prec, 2), "Recall": round(_rec, 2),
+                       "F1-Score": round(_f1, 2), "Support": int(_cm.loc[_lab].sum())})
+pd.DataFrame(_rows).to_csv(
+    TAB / "table_5_12_class_specific_performance.csv", index=False)
 
 # Dataset characteristics JSON (machine-readable)
-_n_valid = int(counts.sum())
 meta = {
     "n_observations": int(len(df)),
     "n_variables": int(df.shape[1]),

@@ -63,7 +63,7 @@ Exact versions from the executed environment (Table 4.1 of the dissertation);
 | Flask-Cors | 6.0.2 | cross-origin support |
 | pydantic | 2.13.5 | strict request validation & error protocol |
 | tqdm | ≥ 4.65 | progress bars in long scripts |
-| pytest | 9.0.2 | test suite (32 tests) |
+| pytest | 9.0.2 | test suite (52 tests) |
 | Plotly.js | 2.27.0 (CDN) | interactive dashboard charts (gauge, SHAP, what-if) |
 
 ---
@@ -301,7 +301,7 @@ for c in why["contributions"][:5]:
 
 ```bash
 node_modules/.bin/tsc --noEmit
-python -m pytest tests/ -q          # 32 tests (including factor-score inference)
+python -m pytest tests/ -q          # 52 tests (including factor-score inference)
 ```
 
 The suite covers the predictor wrapper, the Pydantic validation contract

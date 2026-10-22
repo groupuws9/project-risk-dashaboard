@@ -1,0 +1,14 @@
+Configuration Item,Value,Description
+Python Version,3.13.3,Runtime interpreter
+Random State,42,Seed for all stochastic operations
+CV Folds,5,Stratified K-fold cross-validation
+Test Split Ratio,0.2,80% train / 20% test stratified split
+Data Source,wers_operational_risk_merged.csv,Processed dataset location
+Model Directory,models/saved_models/,Trained model artifacts
+Results Directory,results/,Figures and tables output
+Package Versions,pandas 3.0.1 numpy 2.4.2 scikit-learn 1.8.0,Core dependencies
+XGBoost Version,3.2.0,Gradient boosting library
+LightGBM Version,4.6.0,Gradient boosting library
+SHAP Version,0.51.0,Model interpretability
+Flask Version,3.0.0,Web framework
+Pydantic Version,2.13.5,Input validation
