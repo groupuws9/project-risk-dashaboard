@@ -1,10 +1,13 @@
 """OperationalRiskPredictor — single/batch inference wrapper (README usage)."""
 from pathlib import Path
+import sys
 import joblib
 import pandas as pd
 
 BASE = Path(__file__).resolve().parent.parent
 MODEL_DIR = BASE / "models" / "saved_models"
+sys.path.insert(0, str(BASE / "ml_pipeline"))
+import data_contract as dc  # noqa: E402
 
 _FACTOR_CACHE = {}
 
@@ -24,11 +27,27 @@ class OperationalRiskPredictor:
     """Load a saved pipeline and predict Low/Medium/High risk."""
 
     def __init__(self, pipe, features, labels=("Low", "Medium", "High"),
-                 numeric_features=None):
+                 numeric_features=None, rare_category_map=None,
+                 categorical_features=None):
         self.pipe = pipe
         self.features = list(features)
         self.labels = list(labels)
         self.numeric = set(numeric_features or [])
+        # TRAIN-derived rare categories -> "OTHER_RARE". Persisted by
+        # 04_model_training.py so inference folds exactly the same categories
+        # the model was fitted on (train/serve parity).
+        self.rare_map = dict(rare_category_map or {})
+        # categorical set: explicit if given, else the complement of the
+        # numeric features among the model features (minus the EFA factors,
+        # which are numeric).
+        if categorical_features is not None:
+            self.categorical = set(categorical_features)
+        else:
+            self.categorical = {c for c in self.features
+                                if c not in self.numeric
+                                and not c.startswith("factor_")}
+        self.numeric_list = [c for c in self.features if c in self.numeric]
+        self.categorical_list = [c for c in self.features if c in self.categorical]
 
     @classmethod
     def load(cls, path=None):
@@ -47,12 +66,21 @@ class OperationalRiskPredictor:
         labels = meta.get("labels", ["Low", "Medium", "High"])
         features = meta.get("features")
         numeric = meta.get("numeric_features", [])
+        rare_map = meta.get("rare_category_map", {})
+        categorical = meta.get("categorical_features")
         pipe = joblib.load(path)
         feats = features or getattr(pipe, "feature_names_in_", None)
-        return cls(pipe, feats, labels, numeric)
+        return cls(pipe, feats, labels, numeric, rare_map, categorical)
 
     def _frame(self, data):
-        """Coerce input into the exact dtypes the pipeline was trained on."""
+        """Coerce input into the exact dtypes the pipeline was trained on.
+
+        The cleaning itself is delegated to ``data_contract.apply_serve_transform``
+        so the serving path is literally the SAME code as the training path:
+        numeric coercion, sentinel handling, categorical folding and the
+        TRAIN-derived rare-category grouping.  Any divergence here would mean
+        the deployed model scores rows it was never fitted on.
+        """
         if isinstance(data, pd.DataFrame):
             df = data.copy()
         else:
@@ -60,16 +88,10 @@ class OperationalRiskPredictor:
         for c in self.features:
             if c not in df.columns:
                 df[c] = pd.NA
-            if c in self.numeric:
-                # numeric features must never carry filler strings
-                df[c] = pd.to_numeric(
-                    df[c].replace(["", " ", "NA", "N/A", "MISSING"], pd.NA),
-                    errors="coerce")
-            else:
-                df[c] = df[c].astype("string").str.strip().fillna("MISSING")
-                df[c] = df[c].replace({"": "MISSING", "nan": "MISSING",
-                                       "None": "MISSING"})
+        # factor_* scores are derived from the raw HR items (train/serve parity)
         self._derive_factors(df)
+        df = dc.apply_serve_transform(df, self.numeric_list, self.categorical_list,
+                                      self.rare_map)
         return df[self.features]
 
     def _derive_factors(self, df):

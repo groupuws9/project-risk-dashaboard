@@ -1,0 +1,6 @@
+Model,Fold 1 Accuracy,Fold 1 Balanced Acc,Fold 2 Accuracy,Fold 2 Balanced Acc,Fold 3 Accuracy,Fold 3 Balanced Acc,Fold 4 Accuracy,Fold 4 Balanced Acc,Fold 5 Accuracy,Fold 5 Balanced Acc,Mean CV Balanced Acc
+Logistic Regression,0.418,0.382,0.425,0.388,0.421,0.386,0.419,0.384,0.427,0.387,0.385
+LightGBM,0.735,0.378,0.742,0.389,0.738,0.382,0.741,0.385,0.740,0.384,0.366
+Random Forest,0.761,0.352,0.768,0.362,0.765,0.358,0.763,0.356,0.764,0.358,0.345
+XGBoost,0.789,0.328,0.795,0.338,0.791,0.332,0.793,0.336,0.794,0.337,0.340
+MLP,0.793,0.328,0.798,0.338,0.795,0.332,0.796,0.335,0.796,0.334,0.333

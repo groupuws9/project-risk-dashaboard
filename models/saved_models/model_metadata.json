@@ -108,18 +108,67 @@
     "factor_3",
     "factor_4"
   ],
+  "rare_category_map": {
+    "workplace_age": [
+      "9"
+    ],
+    "collective_bargaining": [
+      "9"
+    ],
+    "bargaining_level_org": [
+      "9"
+    ],
+    "formal_hr_strategy": [
+      "8",
+      "9"
+    ],
+    "performance_appraisal_pct": [
+      "9"
+    ],
+    "training_budget_exists": [
+      "8",
+      "9"
+    ],
+    "job_security_policy": [
+      "9"
+    ],
+    "jcc_exists": [
+      "9"
+    ],
+    "jcc_frequency": [
+      "5"
+    ],
+    "jcc_function": [
+      "9"
+    ],
+    "jcc_union_chair": [
+      "9"
+    ],
+    "information_sharing_score": [
+      "9"
+    ],
+    "investment_plans_shared": [
+      "8",
+      "9"
+    ],
+    "pct_temporary": [
+      "8",
+      "9"
+    ]
+  },
+  "rare_threshold": 0.01,
   "cv_folds": 5,
   "all_test_balanced_accuracy": {
-    "logreg": 0.38931186256533096,
-    "random_forest": 0.35778065047614277,
+    "logreg": 0.3882090306759689,
+    "random_forest": 0.3476111283122809,
     "mlp": 0.3333333333333333,
-    "xgboost": 0.33438108542883754,
-    "lightgbm": 0.38459755751628283,
-    "logreg_smoteenn": 0.37547748696470623,
-    "rf_smoteenn": 0.41445899436811034,
-    "xgboost_tuned": 0.4127974077116037,
-    "stacked_ensemble": 0.39576600929357575,
-    "logreg_smote": 0.3930298645268823
+    "xgboost": 0.3297244094488189,
+    "lightgbm": 0.37060960739926346,
+    "logreg_smoteenn": 0.3919905327645205,
+    "rf_smoteenn": 0.4335766268856139,
+    "xgboost_tuned": 0.4212714301341012,
+    "stacked_ensemble": 0.377740393558646,
+    "logreg_smote": 0.4055868987650384
   },
   "random_state": 42
 }

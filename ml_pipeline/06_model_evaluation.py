@@ -11,6 +11,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import efa_tools  # noqa: E402
+import data_contract as dc  # noqa: E402
 
 BASE = Path(__file__).resolve().parent.parent
 MODEL_DIR = BASE / "models" / "saved_models"
@@ -44,25 +45,23 @@ FEATS = META["features"]
 LABELS = META["labels"]
 TARGET = META["target"]
 
-df = pd.read_csv(DATA)
-df, _ = efa_tools.ensure(df, MODEL_DIR / "factor_scoring.json")  # EFA scores
-X = df[FEATS].copy()
-y = df[TARGET].astype(str).str.strip().map({"Low": 0, "Medium": 1, "High": 2})
-m = y.notna()
-X, y = X.loc[m].reset_index(drop=True), y.loc[m].astype(int).reset_index(drop=True)
-
-# ---- SAME cleaning as 04_model_training.py (else median-imputer chokes) ----
-NUM_FEATS = META.get("numeric_features", [])
-CAT_FEATS = META.get("categorical_features", [])
-MISS_TOKENS = ["", " ", "NA", "N/A", "nan", "None", "-9", "-8"]
-for c in NUM_FEATS:
-    if c in X.columns:
-        X[c] = pd.to_numeric(X[c].replace(MISS_TOKENS, np.nan), errors="coerce")
-for c in CAT_FEATS:
-    if c in X.columns:
-        X[c] = X[c].replace(MISS_TOKENS, np.nan).astype(str).str.strip().replace(
-            {"": "MISSING", "nan": "MISSING", "None": "MISSING"})
-_, Xte, _, yte = train_test_split(X, y, test_size=0.2, stratify=y, random_state=42)
+# ---- canonical test frame (data_contract) -------------------------------
+# The evaluation MUST score the models on exactly the held-out rows the
+# training run used, preprocessed exactly the way the training run did:
+#   * split BEFORE cleaning (train-only rare-category grouping),
+#   * EFA factor scores from the persisted training artifact,
+#   * identical numeric/categorical typing.
+# Building the frame through data_contract guarantees 06 reproduces the
+# training metrics instead of a second, subtly different pipeline.
+FRAMES = dc.build_model_frames()
+Xte = FRAMES["Xte"]
+yte = FRAMES["yte"]
+Xtr = FRAMES["Xtr"]
+ytr = FRAMES["ytr"]
+assert list(FRAMES["features"]) == list(FEATS), (
+    "data_contract features differ from model_metadata.json features")
+print(f"Test frame from contract: {Xte.shape} | "
+      f"dist {yte.value_counts().to_dict()}")
 
 summary = []
 

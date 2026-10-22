@@ -69,76 +69,43 @@ print("=" * 78)
 print("IMBALANCE HANDLING + HYPERPARAMETER TUNING + STACKING (spec 2)")
 print("=" * 78)
 
-df = pd.read_csv(DATA)
-
 # ---- feature contract: reuse the exact leakage-safe feature list that
 # 04_model_training.py wrote to model_metadata.json (33 raw + 4 EFA factors)
-# so the imbalance variants are trained on identical inputs. Fall back to a
-# metadata-free filter only if that contract is absent.
+# so the imbalance variants are trained on identical inputs. The list is
+# taken verbatim from the metadata contract -- the EFA factor columns are NOT
+# present in the raw CSV, so they must not be filtered against it.
 meta = json.loads(META_JSON.read_text()) if META_JSON.exists() else {}
 if "features" in meta:
-    feats = [c for c in meta["features"] if c in df.columns]
+    feats = list(meta["features"])
 else:
+    df = pd.read_csv(DATA)
     feats = [c for c in df.columns
              if c not in ID_COLS + LEAKAGE + [TARGET]]
     for _d in ("industry_code", "industry_code_80"):
         if _d in feats:
             feats.remove(_d)
 
-# EFA factor scores — identical contract to 04_model_training.py (same saved
-# scoring artifact, models/saved_models/factor_scoring.json).
+# ---- canonical frames (data_contract) -----------------------------------
+# 05 must tune the imbalance variants on EXACTLY the same train/test rows and
+# the same preprocessing as 04 (and therefore as 06/07). Previously this
+# script cleaned the whole frame and only then split, which meant the test
+# rows were grouped with training rows before the rare-category grouping and
+# the split was applied to already-cleaned data. The contract removes that
+# divergence: split first, clean second, rare categories derived on train only.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import efa_tools  # noqa: E402
+import data_contract as dc  # noqa: E402
 
-df, _art = efa_tools.ensure(df, MODEL_DIR / "factor_scoring.json")
-factors = [c for c in _art["factor_names"] if c in df.columns]
-missing = [c for c in feats if c not in df.columns]
-if missing:
-    raise SystemExit(f"✗ feature contract columns missing from data: {missing}")
-assert not (set(feats) & set(LEAKAGE)), "leakage columns leaked in!"
+FRAMES = dc.build_model_frames()
+Xtr, Xte = FRAMES["Xtr"], FRAMES["Xte"]
+ytr, yte = FRAMES["ytr"], FRAMES["yte"]
+num_cols = [c for c in FRAMES["num_cols"] if c in feats]
+cat_cols = [c for c in FRAMES["cat_cols"] if c in feats]
+assert list(FRAMES["features"]) == list(feats), (
+    "data_contract features differ from model_metadata.json features: "
+    f"{set(FRAMES['features']) ^ set(feats)}")
 print(f"Feature contract: {len(feats)} features "
-      f"({len(factors)} EFA factors: {factors})")
-
-X = df[feats].copy()
-y = df[TARGET].astype(str).str.strip().map({"Low": 0, "Medium": 1, "High": 2})
-m = y.notna()
-X, y = X.loc[m].reset_index(drop=True), y.loc[m].astype(int).reset_index(drop=True)
-
-# ---- identical cleaning to 04 (median/mode imputation lives in `prep`) ----
-# Column TYPE ASSIGNMENT must match 04 exactly, otherwise the imbalance
-# pipelines would disagree with the deployed model's frame and the median
-# imputer would choke on "MISSING" strings. Authoritative source:
-# model_metadata.json -> numeric_features / categorical_features (written by
-# 04). The heuristic below replicates 04's rule only if that contract is absent.
-MISS = ["", " ", "NA", "N/A", "nan", "None", "-9", "-8"]
-_num_meta = meta.get("numeric_features")
-_cat_meta = meta.get("categorical_features")
-if _num_meta is not None and _cat_meta is not None:
-    num_cols = [c for c in _num_meta if c in feats]
-    cat_cols = [c for c in _cat_meta if c in feats]
-else:
-    num_cols, cat_cols = [], []
-    for c in feats:
-        s = X[c].replace(MISS, np.nan)
-        coerced = pd.to_numeric(s, errors="coerce")
-        valid = s.notna().sum()
-        ratio = (coerced.notna().sum() / valid) if valid else 0
-        (num_cols if (ratio > 0.85 and coerced.nunique(dropna=True) > 12)
-         else cat_cols).append(c)
-_assigned = set(num_cols) | set(cat_cols)
-for c in feats:                      # every feature needs a column type
-    if c not in _assigned:
-        cat_cols.append(c)           # categorical: mode/one-hot never chokes
-for c in feats:
-    if c not in X.columns:
-        continue
-    X[c] = X[c].replace(MISS, np.nan)
-    if c in num_cols:
-        X[c] = pd.to_numeric(X[c], errors="coerce")
-    else:
-        X[c] = X[c].astype(str).str.strip().replace({"": "MISSING",
-                                                      "nan": "MISSING",
-                                                      "None": "MISSING"})
+      f"({len(FRAMES['factor_names'])} EFA factors: {FRAMES['factor_names']})")
 
 preprocess = ColumnTransformer([
     ("num", Pipeline([("imp", SimpleImputer(strategy="median")),
@@ -148,8 +115,6 @@ preprocess = ColumnTransformer([
                                            sparse_output=False))]), cat_cols),
 ])
 
-Xtr, Xte, ytr, yte = train_test_split(X, y, test_size=0.2, stratify=y,
-                                      random_state=RS)
 print(f"Train {len(Xtr)} / Test {len(Xte)} | features {len(feats)} "
       f"({len(num_cols)} num, {len(cat_cols)} cat)")
 

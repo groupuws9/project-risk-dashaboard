@@ -19,7 +19,7 @@ from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (accuracy_score, balanced_accuracy_score, f1_score,
     classification_report, confusion_matrix)
-from sklearn.model_selection import StratifiedKFold, cross_validate, train_test_split
+from sklearn.model_selection import StratifiedKFold, train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sklearn.ensemble import RandomForestClassifier
@@ -35,6 +35,11 @@ try:
     HAS_LGBM = True
 except Exception:
     HAS_LGBM = False
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import efa_tools  # noqa: E402
+import data_contract as dc  # noqa: E402
+from sklearn.base import BaseEstimator, TransformerMixin, clone
 
 BASE = Path(__file__).resolve().parent.parent
 DATA = BASE / "data" / "processed" / "wers_operational_risk_merged.csv"
@@ -95,55 +100,105 @@ for _drop in ("industry_code", "industry_code_80"):
         feats.remove(_drop)
 print(f"Verified {len(feats)} unique leakage-free predictors")
 
+# ---- canonical split (data_contract) ------------------------------------
+# The split is the single source of truth for the held-out test partition and
+# is shared by 05/06/07 so every reported metric refers to the same rows.
+Xtr_raw, Xte_raw, ytr, yte, feats = dc.split_dataset(df, feats)
+print(f"\nTrain {Xtr_raw.shape}  Test {Xte_raw.shape}")
+print("Train dist:", ytr.value_counts().to_dict())
+print("Test  dist:", yte.value_counts().to_dict())
 
-# ---- EFA factor scores (spec 1 §3.7): latent HR-practice constructs --------
-# Deterministic full-sample EFA over the 16 HR/ER practice items (union
-# coverage, collective bargaining, JCC, information sharing, consultation
-# depth, ...). The identical scores are re-applied at inference from
-# models/saved_models/factor_scoring.json => train/serve parity.
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import efa_tools  # noqa: E402
+# ---- EFA factor scores: custom transformer for CV-fold-level fitting ----
+# CRITICAL: EFA must be fitted WITHIN each CV fold to prevent leakage.
+# The target is NEVER passed to EFA - only predictor features are used.
+# This custom transformer fits EFA on training data only during each fold.
+class EFATransformer(BaseEstimator, TransformerMixin):
+    """Custom transformer that fits EFA on training data only (no target leakage).
 
-efa_artifact, _efa_diag = efa_tools.fit(df)
-factors = efa_tools.transform(df, efa_artifact)
-efa_tools.save(efa_artifact, MODEL_DIR / "factor_scoring.json")
+    Fits EFA on the 16 HR/ER practice items within each CV fold,
+    then applies the same transformation to validation/test data.
+    The target variable is never used in EFA fitting.
+    """
+    def __init__(self, random_state=42):
+        self.random_state = random_state
+        self.artifact_ = None
+        self.factor_names_ = None
+
+    def fit(self, X, y=None):
+        """Fit EFA on training data (y is ignored - no target leakage).
+
+        EFA is unsupervised: ``y`` is never used and ``efa_tools.fit`` reads
+        only the HR/ER practice items, so the target can never influence the
+        factor solution.
+        """
+        # Convert to DataFrame if needed
+        if not isinstance(X, pd.DataFrame):
+            X = pd.DataFrame(X)
+        # Defensive: never let the target column leak into the EFA item set.
+        X = X.drop(columns=[TARGET], errors="ignore")
+        # Fit EFA on predictors only (y is intentionally ignored)
+        self.artifact_, _ = efa_tools.fit(X)
+        self.factor_names_ = self.artifact_["factor_names"]
+        return self
+
+    def transform(self, X):
+        """Transform using the fitted EFA artifact.
+
+        Adds (or overwrites) the factor_* score columns on X and returns the
+        frame, so raw predictors and factor scores flow to downstream steps
+        together and frames that already carry factor columns are not
+        duplicated.
+        """
+        if self.artifact_ is None:
+            raise RuntimeError("EFATransformer must be fitted before transform.")
+        if not isinstance(X, pd.DataFrame):
+            X = pd.DataFrame(X)
+        X = X.copy()
+        factors = efa_tools.transform(X, self.artifact_)
+        for c in factors.columns:
+            X[c] = factors[c].values
+        return X
+
+# Fit EFA on full training set once to determine factor structure for metadata
+# (This is for artifact persistence only; CV uses fold-level fitting)
+print("\nFitting EFA on training data (no target) to determine factor structure...")
+efa_artifact_full, _efa_diag = efa_tools.fit(Xtr_raw)
+factors_tr_full = efa_tools.transform(Xtr_raw, efa_artifact_full)
+efa_tools.save(efa_artifact_full, MODEL_DIR / "factor_scoring.json")
 raw_count = len(feats)
-feats = feats + [c for c in factors.columns if c not in feats]
-print(f"EFA: {len(efa_artifact['items'])} items -> {list(factors.columns)} "
-      f"(KMO={efa_artifact['kmo_overall']:.3f}, "
-      f"PA retains {efa_artifact['parallel_analysis']['n_factors']}, "
-      f"retained {efa_artifact['n_factors']})")
+factor_names = list(factors_tr_full.columns)
+feats = feats + factor_names
+print(f"EFA: {len(efa_artifact_full['items'])} items -> {factor_names} "
+      f"(KMO={efa_artifact_full['kmo_overall']:.3f}, "
+      f"PA retains {efa_artifact_full['parallel_analysis']['n_factors']}, "
+      f"retained {efa_artifact_full['n_factors']})")
 print(f"Features: {len(feats)} ({raw_count} raw + "
-      f"{len(factors.columns)} EFA factor scores)")
+      f"{len(factor_names)} EFA factor scores)")
+print("NOTE: EFA will be refitted within each CV fold to prevent leakage.")
 
-X = pd.concat([df[[c for c in feats if c in df.columns]], factors],
-              axis=1)[feats]
-y = df[TARGET].astype(str).str.strip().map({"Low": 0, "Medium": 1, "High": 2})
-mask = y.notna()
-X, y = X.loc[mask].reset_index(drop=True), y.loc[mask].astype(int).reset_index(drop=True)
+# Full-train EFA factor scores for the final model frame (production contract:
+# 33 raw predictors + EFA factor scores, scored with the saved artifact).
+# NOTE: cross-validation below refits EFA within each fold, so validation-fold
+# data never influences the factor scores used for training.
+factors_te_full = efa_tools.transform(Xte_raw, efa_artifact_full)
+Xtr = pd.concat([Xtr_raw, factors_tr_full], axis=1)[feats]
+Xte = pd.concat([Xte_raw, factors_te_full], axis=1)[feats]
 
-# ---- auto-detect numeric vs categorical ----
-MISS_TOKENS = {"", " ", "NA", "N/A", "nan", "None", "-9", "-8"}
-num_cols, cat_cols = [], []
-for c in X.columns:
-    s = X[c].replace(list(MISS_TOKENS), np.nan)
-    coerced = pd.to_numeric(s, errors="coerce")
-    valid = s.notna().sum()
-    numeric_ratio = (coerced.notna().sum() / valid) if valid else 0
-    if numeric_ratio > 0.85 and coerced.nunique(dropna=True) > 12:
-        num_cols.append(c)
-        X[c] = coerced
-    else:
-        cat_cols.append(c)
-        X[c] = s.astype(str).str.strip().replace(
-            {"": "MISSING", " ": "MISSING", "nan": "MISSING", "None": "MISSING"})
-        # group ultra-rare categories (<1%) to reduce dimensionality
-        vc = X[c].value_counts(normalize=True)
-        rare = set(vc[vc < 0.01].index)
-        if rare:
-            X[c] = X[c].apply(lambda v: "OTHER_RARE" if v in rare else v)
+# ---- auto-detect numeric vs categorical (on training data only) ----
+# Cleaning is applied to the RAW predictor frames; factor columns are added
+# afterwards (they are already clean floats from the EFA artifact).  Cleaning
+# Xtr_raw/Xte_raw here means CV fold subsets below are already leakage-safe.
+# The contract owns this transformation so 04/05/06/07 cannot drift apart.
+num_cols, cat_cols, rare_map = dc.clean_frames(Xtr_raw, Xte_raw)
+# EFA factor scores are clean floats -> numeric branch
+num_cols = num_cols + [c for c in factor_names if c not in num_cols]
 print(f"Numeric ({len(num_cols)}): {num_cols}")
 print(f"Categorical ({len(cat_cols)}): {len(cat_cols)} cols")
+
+# Final model frames: cleaned raw predictors + full-train EFA factor scores.
+# CV (below) refits EFA within each fold on cleaned fold-train subsets only.
+Xtr = pd.concat([Xtr_raw, factors_tr_full], axis=1)[feats]
+Xte = pd.concat([Xte_raw, factors_te_full], axis=1)[feats]
 
 preprocess = ColumnTransformer([
     ("num", Pipeline([("imp", SimpleImputer(strategy="median")),
@@ -175,32 +230,65 @@ def build_models():
             class_weight="balanced", verbose=-1, random_state=RANDOM_STATE)
     return models
 
-Xtr, Xte, ytr, yte = train_test_split(
-    X, y, test_size=0.2, stratify=y, random_state=RANDOM_STATE)
-print(f"\nTrain {Xtr.shape}  Test {Xte.shape}")
-print("Train dist:", ytr.value_counts().to_dict())
-print("Test  dist:", yte.value_counts().to_dict())
-
 cv = StratifiedKFold(n_splits=N_SPLITS, shuffle=True, random_state=RANDOM_STATE)
 print(f"CV: stratified {N_SPLITS}-fold (shuffle=True, random_state={RANDOM_STATE})")
 results, fitted = {}, {}
+fold_records = []   # per-model, per-fold CV scores (published in Table 5.11)
 
 
 for name, est in build_models().items():
-    pipe = Pipeline([("prep", preprocess), ("clf", est)])
     print(f"\n--- {name} ---")
     try:
-        sc = cross_validate(pipe, Xtr, ytr, cv=cv,
-            scoring=["accuracy", "balanced_accuracy", "f1_macro"],
-            n_jobs=-1, error_score=np.nan)
-        cv_sum = {k: float(np.nanmean(v)) for k, v in sc.items()
-                  if k.startswith("test_")}
+        # ---- CV with EFA refitted WITHIN each fold -------------------------
+        # Factor scores for fold train/val come from an EFA fitted on that
+        # fold's training partition only: validation rows never influence the
+        # factor solution and the target is never an EFA input.
+        fold_scores = {"accuracy": [], "balanced_accuracy": [], "f1_macro": []}
+        for fold, (tr_idx, val_idx) in enumerate(cv.split(Xtr_raw, ytr), 1):
+            Xf_tr = Xtr_raw.iloc[tr_idx].copy()
+            Xf_val = Xtr_raw.iloc[val_idx].copy()
+            yf_tr = ytr.iloc[tr_idx]
+            yf_val = ytr.iloc[val_idx]
+            efa = EFATransformer(random_state=RANDOM_STATE)
+            efa.fit(Xf_tr)                        # EFA on fold-train only
+            Xf_tr_e = efa.transform(Xf_tr)        # raw + fold-fit factors
+            Xf_val_e = efa.transform(Xf_val)      # val scored with fold artifact
+            fold_pipe = Pipeline([
+                ("prep", clone(preprocess)),
+                ("clf", clone(est)),
+            ])
+            fold_pipe.fit(Xf_tr_e, yf_tr)
+            pred = fold_pipe.predict(Xf_val_e)
+            fold_scores["accuracy"].append(accuracy_score(yf_val, pred))
+            fold_scores["balanced_accuracy"].append(
+                balanced_accuracy_score(yf_val, pred))
+            fold_scores["f1_macro"].append(
+                f1_score(yf_val, pred, average="macro", zero_division=0))
+            # Per-fold scores are recorded so the published fold-level
+            # performance table (Table 5.11) is generated from this very run
+            # instead of being hand-maintained.
+            fold_records.append({
+                "model": name, "fold": fold,
+                "accuracy": fold_scores["accuracy"][-1],
+                "balanced_accuracy": fold_scores["balanced_accuracy"][-1],
+                "f1_macro": fold_scores["f1_macro"][-1],
+            })
+        cv_sum = {f"test_{k}": float(np.nanmean(v))
+                  for k, v in fold_scores.items()}
+        # Export fold-level CV records so Table 5.11 is reproducible from this run
+        fold_df = pd.DataFrame(fold_records)
+        fold_df.to_csv(RESULTS_DIR / "tables" / "table_5_11_fold_level_performance.csv", index=False)
         print("CV acc=%.3f bal=%.3f f1m=%.3f" % (
             cv_sum.get("test_accuracy", np.nan),
             cv_sum.get("test_balanced_accuracy", np.nan),
             cv_sum.get("test_f1_macro", np.nan)))
     except Exception as e:
         print(f"CV failed: {e}"); cv_sum = {}
+    # ---- final model on the full training frame ------------------------------
+    # Preprocess + classifier only: factor columns come from the full-train
+    # EFA artifact (identical contract to inference); EFA refit-per-fold above
+    # guarantees unbiased CV estimates without leaking into the saved pipe.
+    pipe = Pipeline([("prep", preprocess), ("clf", est)])
     pipe.fit(Xtr, ytr)
     pred = pipe.predict(Xte)
     acc = accuracy_score(yte, pred)
@@ -250,7 +338,9 @@ with open(MODEL_DIR / "model_metadata.json", "w") as f:
     json.dump({"best_model": best_name, "target": TARGET, "labels": LABELS,
                "features": feats, "numeric_features": num_cols,
                "categorical_features": cat_cols, "leakage_excluded": LEAKAGE,
-               "factor_features": list(factors.columns),
+               "factor_features": factor_names,
+               "rare_category_map": rare_map,
+               "rare_threshold": dc.RARE_THRESHOLD,
                "cv_folds": N_SPLITS,
                "all_test_balanced_accuracy": {n: r["test"]["balanced_accuracy"]
                                               for n, r in results.items()},

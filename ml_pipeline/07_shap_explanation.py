@@ -18,6 +18,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import efa_tools  # noqa: E402
+import data_contract as dc  # noqa: E402
 
 BASE = Path(__file__).resolve().parent.parent
 DATA = BASE / "data" / "processed" / "wers_operational_risk_merged.csv"
@@ -42,19 +43,19 @@ prep = pipe.named_steps["prep"]
 clf = pipe.named_steps["clf"]
 print(f"Best model: {best} ({type(clf).__name__})")
 
-# ---- data: same cleaning as 04/05 ----------------------------------------
-df = pd.read_csv(DATA)
-df, _ = efa_tools.ensure(df, MODEL_DIR / "factor_scoring.json")  # EFA scores
-X = df[FEATS].copy()
-MISS = ["", " ", "NA", "N/A", "nan", "None", "-9", "-8"]
-for c in NUM:
-    if c in X.columns:
-        X[c] = pd.to_numeric(X[c].replace(MISS, np.nan), errors="coerce")
-for c in CAT:
-    if c in X.columns:
-        X[c] = X[c].replace(MISS, np.nan).astype(str).str.strip().replace(
-            {"": "MISSING", "nan": "MISSING", "None": "MISSING"})
-X = X.reset_index(drop=True)
+# ---- data: canonical contract frame (identical to 04/05/06) ---------------
+# The SHAP background/evaluation rows must be preprocessed exactly like the
+# rows the model was fitted on: same numeric/categorical typing AND the
+# training-derived rare-category grouping. The previous version cleaned the
+# raw frame without the rare-category grouping, so rare levels reached the
+# one-hot encoder as unseen categories (handle_unknown="ignore") and their
+# contribution was silently zeroed out.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import data_contract as dc  # noqa: E402
+
+X, _y, _rare = dc.build_full_frame()
+assert list(X.columns) == list(FEATS), (
+    "contract frame columns differ from model_metadata.json features")
 rng = np.random.RandomState(42)
 bg_idx = rng.choice(len(X), size=min(N_BG, len(X)), replace=False)
 ev_idx = rng.choice(len(X), size=min(N_EVAL, len(X)), replace=False)
