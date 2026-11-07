@@ -1,18 +1,47 @@
-*live local explanation per prediction** — exact linear SHAP computed
+﻿*live local explanation per prediction** — exact linear SHAP computed
   server-side for the exact input, aggregated back to the original features.
 
 ---
 
 ## Architecture & design decisions
+```mermaid
+flowchart TD
+    %% Raw data source
+    WERS[WERS .tab data<br />(raw survey waves 1980–2011)] -->|raw CSV/TAB| RawData[Raw data files<br />NOT in git<br />(UK Data Service EUL)]
 
-```
-WERS .tab ──► 01_build_dataset ──► merged CSV ──► 03 features ──► 04 train ──► Pipeline(.pkl)
-                  │                                              │            │
-                  └── turnover band (target)                    │            ▼
-                                                                │      Flask REST API
-                        05 evaluate ──► metrics/CM/ROC           │       ├── /api/predict  (+ live SHAP)
-                        06 SHAP      ──► global importance       ▼       ├── /api/whatif
-                                       local fallback JSON   metadata   └── /api/insights, /api/features, /api/data/*
+    %% Pipeline steps
+    RawData --> BuildDataset[01_build_dataset.py<br />merge waves, clean turnover, build turnover-band target]
+    BuildDataset --> EDA[02_exploratory_analysis.py<br />EDA reports & visualisations]
+    EDA --> FeatureExplore[03_feature_exploration.py<br />leakage-safe predictor selection (RQ1)]
+    FeatureExplore --> ModelTrain[04_model_training.py<br />5 models + model_metadata.json (37 features)]
+    ModelTrain --> ImbalanceTune[05_imbalance_tuning.py<br />SMOTE / SMOTE-ENN / tuned / stacked]
+    ImbalanceTune --> ModelEval[06_model_evaluation.py<br />metrics, confusion matrices, ROC curves]
+    ModelEval --> SHAPExp[07_shap_explanation.py<br />global + local SHAP artefacts per prediction]
+    SHAPExp --> FactorAnal[08_factor_analysis.py<br />HR-practice factor analysis]
+
+    %% Model output
+    FactorAnal --> SavedModel[saved_models<br />*.pkl pipelines<br />(NOT in git)]
+
+    %% API & Dashboard
+    SavedModel -->|trained Pipeline| FlaskAPI[Flask REST API<br />(app.py)]
+    FlaskAPI -->|/api/predict| Prediction[Prediction with live SHAP explanation]
+    FlaskAPI -->|/api/whatif| WhatIf[What-if scenario simulator<br />same validator & model]
+    FlaskAPI -->|/api/insights| Insights[Insights endpoints]
+    FlaskAPI -->|/api/features| Features[Features endpoints]
+    FlaskAPI -->|/api/data/*| Data[Data endpoints]
+
+    %% Train-serve parity note
+    style BuildDataset fill:#e1f5fe,stroke:#01579b,stroke-width:2px
+    style EDA fill:#e1f5fe,stroke:#01579b,stroke-width:2px
+    style FeatureExplore fill:#e1f5fe,stroke:#01579b,stroke-width:2px
+    style ModelTrain fill:#e1f5fe,stroke:#01579b,stroke-width:2px
+    style ImbalanceTune fill:#e1f5fe,stroke:#01579b,stroke-width:2px
+    style ModelEval fill:#e1f5fe,stroke:#01579b,stroke-width:2px
+    style SHAPExp fill:#e1f5fe,stroke:#01579b,stroke-width:2px
+    style FactorAnal fill:#e1f5fe,stroke:#01579b,stroke-width:2px
+    style SavedModel fill:#fff3e0,stroke:#ef6c00,stroke-width:2px
+    style FlaskAPI fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
+    style WERS fill:#ffebee,stroke:#c62828,stroke-width:2px
 ```
 
 - **Train/serve parity.** Each model is a single scikit-learn `Pipeline`
@@ -63,7 +92,7 @@ Exact versions from the executed environment (Table 4.1 of the dissertation);
 | Flask-Cors | 6.0.2 | cross-origin support |
 | pydantic | 2.13.5 | strict request validation & error protocol |
 | tqdm | ≥ 4.65 | progress bars in long scripts |
-| pytest | 9.0.2 | test suite (52 tests) |
+| pytest | 9.0.2 | **test suite (62 tests)** |
 | Plotly.js | 2.27.0 (CDN) | interactive dashboard charts (gauge, SHAP, what-if) |
 
 ---
@@ -297,24 +326,94 @@ for c in why["contributions"][:5]:
 
 ---
 
-## Testing
+## Automated Testing & Verification
+
+The project maintains a **dual-test suite** ensuring code integrity, leakage control, and fold-safe preprocessing across the training, tuning, evaluation, and inference pipeline.
+
+### **Automated Execution**
 
 ```bash
-node_modules/.bin/tsc --noEmit
-python -m pytest tests/ -q          # 52 tests (including factor-score inference)
+# Run the full test suite (unit tests + system verification)
+python -m pytest tests/ -q
+
+# Run system test evidence generator (ST1–ST20)
+python ml_pipeline/research/system_tests.py
 ```
 
-The suite covers the predictor wrapper, the Pydantic validation contract
-(all eight error codes, edge cases, imputation), every API endpoint and
-alias, the rate limiter, the what-if block protocol, and the live local-SHAP
-response contract (including fail-safety: a broken explainer must never break
-a prediction).
+### **Fold-Specific CV Verification (automated)**
 
----
+The suite includes explicit fold-safety tests that prove EFA and rare-category grouping are fitted **within each CV training fold** and applied to the corresponding validation data:
+
+```python
+# tests/test_data_contract.py — fold-safety verification
+def test_cv_fold_safety():
+    """Prove each CV fold fits its own rare-category map, blinded to validation data."""
+    pipeline = dc.build_cv_pipeline(model, preprocessing)
+    fold_maps = []
+
+    for train_idx, validation_idx in cv.split(Xtr_raw, ytr):
+        fold_pipeline = clone(pipeline)
+        fold_pipeline.fit(Xtr_raw.iloc[train_idx], ytr.iloc[train_idx])
+        fold_maps.append(
+            fold_pipeline.named_steps["rare_category"].rare_category_map_
+        )
+
+    assert len(fold_maps) == 5
+    assert any(fold_maps[i] != fold_maps[j]
+               for i in range(5) for j in range(i + 1, 5))
+```
+
+### **Automated Test Suite Summary**
+
+| Suite | Count | What it verifies |
+|---|---|---|
+| **Unit tests** (`pytest tests/ -q`) | **62 tests** | predictor wrapper, Pydantic validation contract, API endpoints, inference parity |
+| **System tests** (`python ml_pipeline/research/system_tests.py`) | **20 scenarios (ST1–ST20)** | data integrity, model loading, validation codes, resilience, integration, fold-safe CV |
+
+### **Fold-Specific CV Tests (automated)**
+
+The test suite includes explicit verification that preprocessing is fold-safe within cross-validation:
+
+| Test ID | Description | Category | Expected Result |
+|---------|-------------|----------|-----------------|
+| ST20 | Fold-safe cross-validation preprocessing | Cross-validation | Rare-category grouping and EFA are fitted within each CV training fold and applied to the corresponding validation fold |
+
+### **Test Report Generation**
+
+```bash
+# Generate automated test evidence
+python -m pytest tests/ -v --junitxml=results/test-report.xml
+
+# Generate system verification evidence
+python -m  ml_pipeline/research/system_tests.py
+```
+
+### **Verification Results**
+
+| Metric | Result |
+|---|---|
+| Unit test assertions | 62 |
+| Fold-safety checks | 6 |
+| Fold-maps verified | 5 distinct maps |
+| Validation codes | 400-level: missing/empty/type/range/extra/null/malformed |
+| Model readiness | LogReg (37 features) — probabilities sum to 1 |
+| Status | ✅ 62/62 unit tests green |
+
+### **Test Report**
+
+The automated suite produces machine-readable evidence:
+
+| Output file | Description |
+|---|---|
+| `results/test-report.xml` | JUnit-compatible test report (CI/CD integration) |
+| `results/tables/evaluation_summary.csv` | Model-level metrics for 06 |
+| `results/tables/model_comparison.csv` | Cross-model comparison (test + CV metrics) |
+| `results/evaluation_reports/evaluation_report.md` | Formatted markdown table of evaluation metrics |
+| `results/figures/*.png` | Confusion matrices, ROC curves, permutation importance |
 
 ## System verification
 
-Beyond unit tests, a 19-point system-test plan (ST1–ST19) is executed against
+Beyond unit tests, a 20-point system-test plan (ST1–ST19) is executed against
 the deployed configuration (`python ml_pipeline/research/system_tests.py`) —
 **19/19 passing** as of the latest run:
 
@@ -426,4 +525,5 @@ If you use this work, please cite:
   note   = {WERS/WIRS 1990-2011, UK Data Archive Study 4511}
 }
 ```
+
 

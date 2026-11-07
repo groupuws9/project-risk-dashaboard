@@ -1,14 +1,25 @@
-"""Flask dashboard — risk prediction, data explorer, model insights, what-if lab.
-
-Runtime guarantees (spec 1 §3.10, spec 2 §3.7, spec 3 §3.6):
-  * Pydantic input contract before any model inference
-  * Structured error responses (MISSING_FIELD / INVALID_TYPE / OUT_OF_RANGE /
-    MALFORMED_JSON / MODEL_ERROR / INTERNAL_ERROR / RATE_LIMITED)
-  * request-ID logging of every failed request (no payload contents)
-  * per-IP rate limiting, CORS, spec-named endpoint aliases
-
-Run:  python dashboard/app.py   ->  http://localhost:5000
 """
+Flask dashboard — risk prediction, data explorer, model insights and what-if lab.
+
+Runtime guarantees:
+
+* Pydantic input validation occurs before model inference.
+* Structured error responses are returned for validation, inference and
+  server failures.
+* Request identifiers are logged for failed requests without logging payload
+  contents.
+* Per-IP rate limiting and CORS are enabled.
+* The prediction endpoint passes raw input data to the saved full pipeline.
+
+Run:
+
+    python dashboard/app.py
+
+Then open:
+
+    http://localhost:5000
+"""
+
 from pathlib import Path
 import json
 import logging
@@ -21,369 +32,742 @@ from collections import defaultdict, deque
 import pandas as pd
 
 BASE = Path(__file__).resolve().parent.parent
+
 sys.path.insert(0, str(BASE / "models"))
 sys.path.insert(0, str(BASE))
 
 from flask import Flask, jsonify, render_template, request, Response
 from flask_cors import CORS
+from pydantic import ValidationError
 
 from risk_predictor import OperationalRiskPredictor
-from dashboard.validation import error_body, model_to_payload, validate_payload
+from dashboard.validation import (
+    error_body,
+    model_to_payload,
+    validate_payload,
+    pydantic_error_to_response,
+)
+
 
 app = Flask(__name__)
-CORS(app)  # spec 3.9: Flask-CORS
+CORS(app)
 
 MODEL_DIR = BASE / "models" / "saved_models"
 TAB_DIR = BASE / "results" / "tables"
 DATA_PATH = BASE / "data" / "processed" / "wers_operational_risk_merged.csv"
 
-logging.basicConfig(level=logging.INFO,
-                    format="%(asctime)s %(levelname)s %(message)s")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(message)s",
+)
+
 LOG = logging.getLogger("dashboard")
 
-# ---- rate limiting (spec 3.6.3: HTTP 429 RATE_LIMITED) --------------------
+# ---------------------------------------------------------------------------
+# Rate limiting
+# ---------------------------------------------------------------------------
+
 RATE_LIMIT = int(os.environ.get("DASH_RATE_LIMIT", "120"))
 RATE_WINDOW = 60
-_hits = defaultdict(deque)
+
+request_timestamps = defaultdict(deque)
 
 
-def _rate_limited():
+def is_rate_limited():
+    """Return True if the requesting IP exceeds the configured rate limit."""
     now = time.time()
-    q = _hits[request.remote_addr or "?"]
-    while q and q[0] < now - RATE_WINDOW:
-        q.popleft()
-    q.append(now)
-    return len(q) > RATE_LIMIT
+    client_key = request.remote_addr or "unknown"
+
+    timestamps = request_timestamps[client_key]
+
+    while timestamps and timestamps[0] < now - RATE_WINDOW:
+        timestamps.popleft()
+
+    timestamps.append(now)
+
+    return len(timestamps) > RATE_LIMIT
 
 
 @app.before_request
-def _guard_rate_limit():
+def apply_rate_limit():
+    """Assign a request identifier and apply per-IP rate limiting."""
     request.rid = uuid.uuid4().hex[:8]
-    if _rate_limited():
+
+    if is_rate_limited():
         body, status = error_body(
             "RATE_LIMITED",
             f"Too many requests. Please retry in {RATE_WINDOW} seconds.",
-            request_id=request.rid)
-        resp = jsonify(body)
-        resp.status_code = status
-        resp.headers["Retry-After"] = str(RATE_WINDOW)
-        return resp
+            request_id=request.rid,
+        )
+
+        response = jsonify(body)
+        response.status_code = status
+        response.headers["Retry-After"] = str(RATE_WINDOW)
+
+        return response
+
     return None
 
 
 @app.after_request
-def _log_request(resp):
-    rid = getattr(request, "rid", "-")
-    resp.headers["X-Request-ID"] = rid
-    if resp.status_code >= 400:
-        try:
-            code = resp.get_json().get("code", "?")
-        except Exception:
-            code = "?"
-        LOG.warning("rid=%s %s %s -> %s (%s)", rid, request.method,
-                    request.path, resp.status_code, code)
-    return resp
+def log_request(response):
+    """Add a request identifier and log failed requests without payloads."""
+    request_id = getattr(request, "rid", "-")
 
+    response.headers["X-Request-ID"] = request_id
+
+    if response.status_code >= 400:
+        try:
+            error_code = response.get_json().get("code", "UNKNOWN")
+        except Exception:
+            error_code = "UNKNOWN"
+
+        LOG.warning(
+            "rid=%s %s %s -> %s (%s)",
+            request_id,
+            request.method,
+            request.path,
+            response.status_code,
+            error_code,
+        )
+
+    return response
+
+
+# ---------------------------------------------------------------------------
+# Error handlers
+# ---------------------------------------------------------------------------
 
 @app.errorhandler(400)
-def _bad_request(_e):
-    body, status = error_body("MALFORMED_JSON", "Invalid JSON format",
-                              request_id=getattr(request, "rid", None))
+def handle_bad_request(_error):
+    """Handle malformed JSON and other bad requests."""
+    body, status = error_body(
+        "MALFORMED_JSON",
+        "Invalid JSON format",
+        request_id=getattr(request, "rid", None),
+    )
+
+    return jsonify(body), status
+
+
+@app.errorhandler(ValidationError)
+def handle_validation_error(error):
+    """Handle Pydantic validation errors with structured responses."""
+    body, status = pydantic_error_to_response(
+        error,
+        request_id=getattr(request, "rid", None),
+    )
+
     return jsonify(body), status
 
 
 @app.errorhandler(500)
-def _server_error(_e):
-    body, status = error_body("INTERNAL_ERROR", "An unexpected error occurred",
-                              request_id=getattr(request, "rid", None))
+def handle_server_error(_error):
+    """Handle unexpected server errors."""
+    body, status = error_body(
+        "INTERNAL_ERROR",
+        "An unexpected error occurred",
+        request_id=getattr(request, "rid", None),
+    )
+
     return jsonify(body), status
 
 
-predictor, META, DF = None, {}, None
+# ---------------------------------------------------------------------------
+# Model and dataset loading
+# ---------------------------------------------------------------------------
+
+predictor = None
+metadata = {}
+dataset = None
+
 try:
     predictor = OperationalRiskPredictor.load()
-    META = json.loads((MODEL_DIR / "model_metadata.json").read_text())
-except Exception as e:
-    print(f"WARNING: model not loaded yet ({e}). Train first: 04_model_training.py")
-try:
-    DF = pd.read_csv(DATA_PATH)
-except Exception as e:
-    print(f"WARNING: dataset not loaded ({e})")
+    metadata = json.loads(
+        (MODEL_DIR / "model_metadata.json").read_text()
+    )
+except Exception as error:
+    print(
+        f"WARNING: model not loaded yet ({error}). "
+        "Run 04_model_training.py first."
+    )
 
+try:
+    dataset = pd.read_csv(DATA_PATH)
+except Exception as error:
+    print(f"WARNING: dataset not loaded ({error}).")
+
+
+# ---------------------------------------------------------------------------
+# Dashboard pages
+# ---------------------------------------------------------------------------
 
 @app.route("/")
 def index():
-    feats = META.get("features", [])
-    return render_template("index.html", features=feats,
-                           labels=META.get("labels", ["Low", "Medium", "High"]),
-                           best_model=META.get("best_model", "—"))
+    """Render the dashboard home page."""
+    return render_template(
+        "index.html",
+        features=metadata.get("features", []),
+        labels=metadata.get(
+            "labels",
+            ["Low", "Medium", "High"],
+        ),
+        best_model=metadata.get("best_model", "Not available"),
+    )
 
+
+# ---------------------------------------------------------------------------
+# Model metadata
+# ---------------------------------------------------------------------------
 
 @app.route("/api/metadata")
 def api_metadata():
-    out = dict(META)
-    for k in ("features", "numeric_features", "categorical_features"):
-        out[k] = out.get(k, [])
-    return jsonify(out)
+    """Return model metadata for the dashboard."""
+    response = dict(metadata)
+
+    for key in (
+        "features",
+        "numeric_features",
+        "categorical_features",
+    ):
+        response[key] = response.get(key, [])
+
+    return jsonify(response)
 
 
-def _read_json():
-    """Decode JSON body or return the MALFORMED_JSON error response."""
+# ---------------------------------------------------------------------------
+# Prediction helpers
+# ---------------------------------------------------------------------------
+
+def read_json_payload():
+    """Decode the JSON request body or return a structured error."""
     payload = request.get_json(silent=True)
+
     if payload is None and request.data:
-        body, status = error_body("MALFORMED_JSON", "Invalid JSON format",
-                                  request_id=request.rid)
+        body, status = error_body(
+            "MALFORMED_JSON",
+            "Invalid JSON format",
+            request_id=request.rid,
+        )
+
         return None, (jsonify(body), status)
+
     if payload is None:
         payload = {}
+
     return payload, None
 
 
-def _run_prediction(payload, request_id, explain=True):
-    """Validate one org dict then predict. Returns (dict, None) or (None, resp).
-
-    With explain=True the response carries a live local SHAP explanation for
-    the predicted class (computed fail-safe; never breaks the prediction).
-    What-if calls pass explain=False — it compares outcomes, not reasons.
+def run_prediction(
+    payload,
+    request_id,
+    explain=True,
+):
     """
-    model, err, status, extras = validate_payload(payload, request_id)
-    if err is not None:
-        return None, (jsonify(err), status)
-    if extras:
-        LOG.warning("rid=%s ignored unexpected field(s): %s",
-                    request_id, ", ".join(extras))  # spec 3.7.2 step 5
-    data = model_to_payload(model)
+    Validate one organisation record and generate a prediction.
+
+    The raw payload is passed to the predictor. The saved full pipeline is
+    responsible for categorical cleaning, numeric coercion, rare-category
+    grouping, EFA, imputation, scaling, encoding and classification.
+    """
+    validated_model, error, status, extra_fields = validate_payload(
+        payload,
+        request_id,
+    )
+
+    if error is not None:
+        return None, (jsonify(error), status)
+
+    if extra_fields:
+        LOG.warning(
+            "rid=%s ignored unexpected field(s): %s",
+            request_id,
+            ", ".join(extra_fields),
+        )
+
+    raw_record = model_to_payload(validated_model)
+
     try:
-        label, prob = predictor.predict(data)
-        probs = predictor.predict_proba_dict(data)
-    except Exception as e:
-        LOG.warning("rid=%s MODEL_ERROR: %s", request_id, e)
-        body, st = error_body(
+        predicted_label, probability = predictor.predict(raw_record)
+        class_probabilities = predictor.predict_proba_dict(raw_record)
+    except Exception as error:
+        LOG.warning(
+            "rid=%s MODEL_ERROR: %s",
+            request_id,
+            error,
+        )
+
+        body, status = error_body(
             "MODEL_ERROR",
-            "Model inference failed due to incomplete feature vector",
-            request_id=request_id)
-        return None, (jsonify(body), st)
-    if any(v != v for v in probs.values()):  # NaN check
-        body, st = error_body(
+            "Model inference failed",
+            request_id=request_id,
+        )
+
+        return None, (jsonify(body), status)
+
+    if any(
+        value != value
+        for value in class_probabilities.values()
+    ):
+        body, status = error_body(
             "MODEL_ERROR",
-            "Model inference failed due to incomplete feature vector",
-            request_id=request_id)
-        return None, (jsonify(body), st)
-    out = {"risk_level": label, "probability": prob, "probabilities": probs}
+            "Model inference failed",
+            request_id=request_id,
+        )
+
+        return None, (jsonify(body), status)
+
+    response = {
+        "risk_level": predicted_label,
+        "probability": probability,
+        "probabilities": class_probabilities,
+    }
+
     if explain:
         try:
-            loc = predictor.explain(data)
-        except Exception as e:            # explainability is optional decoration
-            LOG.warning("rid=%s local SHAP skipped: %s", request_id, e)
-            loc = None
-        if loc is not None:
-            out["local_explanation"] = loc
-    return out, None
+            local_explanation = predictor.explain(raw_record)
+        except Exception as error:
+            LOG.warning(
+                "rid=%s local SHAP explanation skipped: %s",
+                request_id,
+                error,
+            )
+            local_explanation = None
 
+        if local_explanation is not None:
+            response["local_explanation"] = local_explanation
+
+    return response, None
+
+
+# ---------------------------------------------------------------------------
+# Prediction endpoints
+# ---------------------------------------------------------------------------
 
 @app.route("/api/predict", methods=["POST"])
-@app.route("/predict", methods=["POST"])  # spec 3.2 alias
+@app.route("/predict", methods=["POST"])
 def api_predict():
+    """Return a turnover-band prediction for one organisation record."""
     if predictor is None:
-        body, st = error_body("SERVICE_UNAVAILABLE",
-                              "Model not trained yet.", request_id=request.rid)
-        return jsonify(body), st
-    payload, resp = _read_json()
-    if resp:
-        return resp
-    out, err = _run_prediction(payload, request.rid)
-    if err:
-        return err
-    return jsonify(out)
+        body, status = error_body(
+            "SERVICE_UNAVAILABLE",
+            "Model not trained yet.",
+            request_id=request.rid,
+        )
+
+        return jsonify(body), status
+
+    payload, error_response = read_json_payload()
+
+    if error_response:
+        return error_response
+
+    response, error_response = run_prediction(
+        payload,
+        request.rid,
+    )
+
+    if error_response:
+        return error_response
+
+    return jsonify(response)
 
 
-def _tag_block(err, block):
-    """Tag a structured error with which what-if block failed (baseline/scenario).
+def tag_error_block(error_response, block_name):
+    """Tag a structured validation error with the failing what-if block."""
+    response, status = error_response
+    body = response.get_json() or {}
 
-    Keeps the error-code protocol intact while making per-block validation
-    failures unambiguous for both the UI (inline highlighting) and API users.
-    """
-    resp, status = err
-    body = resp.get_json() or {}
-    body["block"] = block
-    body["error"] = f"[{block}] " + str(body.get("error", ""))
+    body["block"] = block_name
+    body["error"] = f"[{block_name}] {body.get('error', '')}"
+
     return jsonify(body), status
 
 
 @app.route("/api/whatif", methods=["POST"])
-@app.route("/simulate", methods=["POST"])   # spec 3.2 alias
+@app.route("/simulate", methods=["POST"])
 def api_whatif():
-    """Compare baseline vs modified scenario side-by-side."""
+    """Compare a baseline organisation record with a modified scenario."""
     if predictor is None:
-        body, st = error_body("SERVICE_UNAVAILABLE",
-                              "Model not trained yet.", request_id=request.rid)
-        return jsonify(body), st
-    payload, resp = _read_json()
-    if resp:
-        return resp
-    base = payload.get("baseline") if isinstance(payload, dict) else None
-    alt = payload.get("scenario") if isinstance(payload, dict) else None
-    if not isinstance(base, dict) or not isinstance(alt, dict):
-        body, st = error_body(
+        body, status = error_body(
+            "SERVICE_UNAVAILABLE",
+            "Model not trained yet.",
+            request_id=request.rid,
+        )
+
+        return jsonify(body), status
+
+    payload, error_response = read_json_payload()
+
+    if error_response:
+        return error_response
+
+    baseline = (
+        payload.get("baseline")
+        if isinstance(payload, dict)
+        else None
+    )
+
+    scenario = (
+        payload.get("scenario")
+        if isinstance(payload, dict)
+        else None
+    )
+
+    if not isinstance(baseline, dict) or not isinstance(scenario, dict):
+        body, status = error_body(
             "MALFORMED_JSON",
             "Request body must contain 'baseline' and 'scenario' objects",
-            request_id=request.rid)
-        return jsonify(body), st
-    base_out, err = _run_prediction(base, request.rid, explain=False)
-    if err:
-        return _tag_block(err, "baseline")
-    alt_out, err = _run_prediction(alt, request.rid, explain=False)
-    if err:
-        return _tag_block(err, "scenario")
-    return jsonify({"baseline": base_out, "scenario": alt_out})
+            request_id=request.rid,
+        )
+
+        return jsonify(body), status
+
+    baseline_response, baseline_error = run_prediction(
+        baseline,
+        request.rid,
+        explain=False,
+    )
+
+    if baseline_error:
+        return tag_error_block(baseline_error, "baseline")
+
+    scenario_response, scenario_error = run_prediction(
+        scenario,
+        request.rid,
+        explain=False,
+    )
+
+    if scenario_error:
+        return tag_error_block(scenario_error, "scenario")
+
+    return jsonify(
+        {
+            "baseline": baseline_response,
+            "scenario": scenario_response,
+        }
+    )
 
 
+# ---------------------------------------------------------------------------
+# Data explorer
+# ---------------------------------------------------------------------------
 
 @app.route("/api/data/summary")
-@app.route("/data")  # spec 3.2 alias (data explorer)
+@app.route("/data")
 def api_data_summary():
-    if DF is None:
-        return jsonify({"error": "Dataset unavailable"}), 503
+    """Return descriptive summaries from the uploaded or sample dataset."""
+    if dataset is None:
+        body, status = error_body(
+            "SERVICE_UNAVAILABLE",
+            "Dataset unavailable",
+            request_id=request.rid,
+        )
+
+        return jsonify(body), status
+
+    filtered_data = dataset.copy()
+
     sector = request.args.get("sector", "")
-    size = request.args.get("size", "")
-    d = DF
-    if sector and "sector" in d.columns:
-        d = d[d["sector"].astype(str) == str(sector)]
-    if size and "org_size_category_3" in d.columns:
-        d = d[d["org_size_category_3"].astype(str) == str(size)]
-    dist = d["operational_risk_category"].value_counts().to_dict() if \
-        "operational_risk_category" in d.columns else {}
-    out = {"n": int(len(d)), "risk_distribution": dist,
-           "mean_score": float(d["operational_risk_score"].mean())
-           if "operational_risk_score" in d.columns else None}
-    if "operational_risk_score" in d.columns:
-        out["score_histogram"] = d["operational_risk_score"].value_counts(
-            bins=10, sort=False).tolist()
+    organisation_size = request.args.get("size", "")
+
+    if sector and "sector" in filtered_data.columns:
+        filtered_data = filtered_data[
+            filtered_data["sector"].astype(str) == str(sector)
+        ]
+
+    if (
+        organisation_size
+        and "org_size_category_3" in filtered_data.columns
+    ):
+        filtered_data = filtered_data[
+            filtered_data["org_size_category_3"].astype(str)
+            == str(organisation_size)
+        ]
+
+    risk_distribution = {}
+
+    if "operational_risk_category" in filtered_data.columns:
+        risk_distribution = (
+            filtered_data["operational_risk_category"]
+            .value_counts()
+            .to_dict()
+        )
+
+    response = {
+        "n": int(len(filtered_data)),
+        "risk_distribution": risk_distribution,
+        "descriptive_note": (
+            "The turnover-rate distribution is descriptive and is not used "
+            "as a model input."
+        ),
+    }
+
+    if "employee_turnover_rate" in filtered_data.columns:
+        turnover_rate = pd.to_numeric(
+            filtered_data["employee_turnover_rate"],
+            errors="coerce",
+        )
+
+        response["turnover_rate_mean"] = (
+            float(turnover_rate.mean())
+            if turnover_rate.notna().any()
+            else None
+        )
+
+        response["turnover_rate_histogram"] = (
+            turnover_rate.dropna()
+            .value_counts(bins=10, sort=False)
+            .tolist()
+        )
+
     try:
-        out["by_sector"] = {
-            (str(k).strip() or "Unknown"): v for k, v in d.groupby("sector")[
-                "operational_risk_score"].mean().round(2).to_dict().items()
+        response["turnover_rate_by_sector"] = {
+            str(sector_value).strip() or "Unknown": float(mean_value)
+            for sector_value, mean_value in filtered_data.groupby("sector")[
+                "employee_turnover_rate"
+            ].mean().items()
         }
     except Exception:
-        out["by_sector"] = {}
-    return jsonify(out)
+        response["turnover_rate_by_sector"] = {}
+
+    return jsonify(response)
 
 
 @app.route("/api/data/export")
 def api_data_export():
-    """CSV export of the currently filtered data (spec 3.4 Data Explorer)."""
-    if DF is None:
-        body, st = error_body("SERVICE_UNAVAILABLE", "Dataset unavailable",
-                              request_id=request.rid)
-        return jsonify(body), st
-    d = DF
+    """Export the currently filtered descriptive dataset as CSV."""
+    if dataset is None:
+        body, status = error_body(
+            "SERVICE_UNAVAILABLE",
+            "Dataset unavailable",
+            request_id=request.rid,
+        )
+
+        return jsonify(body), status
+
+    filtered_data = dataset.copy()
+
     sector = request.args.get("sector", "")
-    size = request.args.get("size", "")
-    if sector and "sector" in d.columns:
-        d = d[d["sector"].astype(str) == str(sector)]
-    if size and "org_size_category_3" in d.columns:
-        d = d[d["org_size_category_3"].astype(str) == str(size)]
-    csv = d.to_csv(index=False)
-    return Response(csv, mimetype="text/csv", headers={
-        "Content-Disposition": "attachment; filename=wers_panel_filtered.csv"})
+    organisation_size = request.args.get("size", "")
+
+    if sector and "sector" in filtered_data.columns:
+        filtered_data = filtered_data[
+            filtered_data["sector"].astype(str) == str(sector)
+        ]
+
+    if (
+        organisation_size
+        and "org_size_category_3" in filtered_data.columns
+    ):
+        filtered_data = filtered_data[
+            filtered_data["org_size_category_3"].astype(str)
+            == str(organisation_size)
+        ]
+
+    csv_content = filtered_data.to_csv(index=False)
+
+    return Response(
+        csv_content,
+        mimetype="text/csv",
+        headers={
+            "Content-Disposition": (
+                "attachment; filename=wers_panel_filtered.csv"
+            )
+        },
+    )
 
 
 @app.route("/api/data/upload", methods=["POST"])
 def api_data_upload():
-    """Upload a cleaned CSV file to replace the current dataset."""
-    global DF
+    """Upload a cleaned CSV file for descriptive exploration."""
+    global dataset
+
     if "file" not in request.files:
-        body, st = error_body("MISSING_FIELD", "No file provided",
-                              request_id=request.rid)
-        return jsonify(body), st
+        body, status = error_body(
+            "MISSING_FIELD",
+            "No file provided",
+            request_id=request.rid,
+        )
 
-    file = request.files["file"]
-    if file.filename == "":
-        body, st = error_body("MISSING_FIELD", "No file selected",
-                              request_id=request.rid)
-        return jsonify(body), st
+        return jsonify(body), status
 
-    if not file.filename.endswith(".csv"):
-        body, st = error_body("INVALID_TYPE", "Only CSV files are supported",
-                              request_id=request.rid)
-        return jsonify(body), st
+    uploaded_file = request.files["file"]
+
+    if uploaded_file.filename == "":
+        body, status = error_body(
+            "MISSING_FIELD",
+            "No file selected",
+            request_id=request.rid,
+        )
+
+        return jsonify(body), status
+
+    if not uploaded_file.filename.endswith(".csv"):
+        body, status = error_body(
+            "INVALID_TYPE",
+            "Only CSV files are supported",
+            request_id=request.rid,
+        )
+
+        return jsonify(body), status
 
     try:
-        df = pd.read_csv(file)
-        DF = df
-        LOG.info("Data uploaded successfully: %d rows, %d columns", len(df), len(df.columns))
-        return jsonify({"n": len(df), "columns": list(df.columns)})
-    except Exception as e:
-        LOG.error("Data upload error: %s", e)
-        body, st = error_body("INTERNAL_ERROR", f"Failed to parse CSV: {str(e)}",
-                              request_id=request.rid)
-        return jsonify(body), st
+        uploaded_data = pd.read_csv(uploaded_file)
+        dataset = uploaded_data
+
+        LOG.info(
+            "Data uploaded successfully: %d rows, %d columns",
+            len(uploaded_data),
+            len(uploaded_data.columns),
+        )
+
+        return jsonify(
+            {
+                "n": len(uploaded_data),
+                "columns": list(uploaded_data.columns),
+            }
+        )
+
+    except Exception as error:
+        LOG.error("Data upload error: %s", error)
+
+        body, status = error_body(
+            "INTERNAL_ERROR",
+            f"Failed to parse CSV: {error}",
+            request_id=request.rid,
+        )
+
+        return jsonify(body), status
 
 
 @app.route("/api/data/load-sample", methods=["POST"])
 def api_load_sample():
-    """Load sample data from the processed directory."""
-    global DF
-    try:
-        df = pd.read_csv(DATA_PATH)
-        DF = df
-        LOG.info("Sample data loaded: %d rows", len(df))
-        return jsonify({"n": len(df), "columns": list(df.columns)})
-    except Exception as e:
-        LOG.error("Failed to load sample data: %s", e)
-        body, st = error_body("SERVICE_UNAVAILABLE",
-                              f"Could not load sample data: {str(e)}",
-                              request_id=request.rid)
-        return jsonify(body), st
+    """Load the processed sample dataset for descriptive exploration."""
+    global dataset
 
+    try:
+        sample_data = pd.read_csv(DATA_PATH)
+        dataset = sample_data
+
+        LOG.info(
+            "Sample data loaded: %d rows",
+            len(sample_data),
+        )
+
+        return jsonify(
+            {
+                "n": len(sample_data),
+                "columns": list(sample_data.columns),
+            }
+        )
+
+    except Exception as error:
+        LOG.error(
+            "Failed to load sample data: %s",
+            error,
+        )
+
+        body, status = error_body(
+            "SERVICE_UNAVAILABLE",
+            f"Could not load sample data: {error}",
+            request_id=request.rid,
+        )
+
+        return jsonify(body), status
+
+
+# ---------------------------------------------------------------------------
+# Model insights
+# ---------------------------------------------------------------------------
 
 @app.route("/api/features")
 def api_features():
-    """Feature importance + SHAP explanation data (spec 3.2 /features)."""
-    out = {"best_model": META.get("best_model"), "shap": None,
-           "local_explanation": None}
-    fi = TAB_DIR / "feature_importance.csv"
-    if fi.exists():
+    """Return feature importance and SHAP explanation data."""
+    response = {
+        "best_model": metadata.get("best_model"),
+        "shap": None,
+        "local_explanation": None,
+    }
+
+    feature_importance_path = TAB_DIR / "feature_importance.csv"
+
+    if feature_importance_path.exists():
         try:
-            out["feature_importance"] = json.loads(
-                pd.read_csv(fi).head(30).to_json(orient="records"))
+            response["feature_importance"] = json.loads(
+                pd.read_csv(feature_importance_path)
+                .head(30)
+                .to_json(orient="records")
+            )
         except Exception:
             pass
-    shap_p = TAB_DIR / "shap_importance.csv"
-    if shap_p.exists():
+
+    shap_importance_path = TAB_DIR / "shap_importance.csv"
+
+    if shap_importance_path.exists():
         try:
-            out["shap"] = json.loads(
-                pd.read_csv(shap_p).head(30).to_json(orient="records"))
+            response["shap"] = json.loads(
+                pd.read_csv(shap_importance_path)
+                .head(30)
+                .to_json(orient="records")
+            )
         except Exception:
             pass
-    loc_p = TAB_DIR / "shap_local.json"
-    if loc_p.exists():
+
+    local_explanation_path = TAB_DIR / "shap_local.json"
+
+    if local_explanation_path.exists():
         try:
-            out["local_explanation"] = json.loads(loc_p.read_text())
+            response["local_explanation"] = json.loads(
+                local_explanation_path.read_text()
+            )
         except Exception:
             pass
-    return jsonify(out)
+
+    return jsonify(response)
 
 
 @app.route("/api/insights")
 def api_insights():
-    out = {}
-    for name in ("model_comparison.csv", "feature_importance.csv",
-                 "evaluation_summary.csv", "shap_importance.csv"):
-        p = TAB_DIR / name
-        if p.exists():
+    """Return model-comparison, evaluation and explanation outputs."""
+    response = {}
+
+    for file_name in (
+        "model_comparison.csv",
+        "feature_importance.csv",
+        "evaluation_summary.csv",
+        "shap_importance.csv",
+    ):
+        file_path = TAB_DIR / file_name
+
+        if file_path.exists():
             try:
-                out[name] = json.loads(
-                    pd.read_csv(p).head(50).to_json(orient="records"))
+                response[file_name] = json.loads(
+                    pd.read_csv(file_path)
+                    .head(50)
+                    .to_json(orient="records")
+                )
             except Exception:
                 pass
-    # Always return valid JSON with defaults for missing model data
-    out["best_model"] = META.get("best_model") if META else None
-    out["metrics"] = META.get("all_test_balanced_accuracy", {}) if META else {}
-    return jsonify(out)
+
+    response["best_model"] = (
+        metadata.get("best_model")
+        if metadata
+        else None
+    )
+
+    response["metrics"] = (
+        metadata.get("all_test_balanced_accuracy", {})
+        if metadata
+        else {}
+    )
+
+    return jsonify(response)
 
 
 if __name__ == "__main__":
-    # Run without debug mode to avoid file watcher reload instability
-    app.run(host="0.0.0.0", port=5000, debug=False)
-
+    app.run(
+        host="0.0.0.0",
+        port=5000,
+        debug=False,
+    )

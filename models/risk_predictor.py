@@ -1,243 +1,349 @@
-"""OperationalRiskPredictor — single/batch inference wrapper (README usage)."""
+"""
+OperationalRiskPredictor — single and batch inference wrapper.
+
+This wrapper loads a saved full pipeline and applies it to raw organisation
+records. It does not manually repeat preprocessing.
+
+The saved pipeline contains the complete inference workflow:
+
+    Categorical cleaning
+    -> numeric coercion
+    -> rare-category grouping
+    -> EFA
+    -> imputation, scaling and encoding
+    -> classifier
+
+Therefore, raw API payloads are converted to a raw one-row DataFrame and
+passed directly to the saved pipeline.
+"""
+
 from pathlib import Path
+import json
 import sys
+
 import joblib
+import numpy as np
 import pandas as pd
 
 BASE = Path(__file__).resolve().parent.parent
 MODEL_DIR = BASE / "models" / "saved_models"
+
 sys.path.insert(0, str(BASE / "ml_pipeline"))
+
 import data_contract as dc  # noqa: E402
-
-_FACTOR_CACHE = {}
-
-
-def _factor_artifact():
-    """Load the EFA scoring artifact once (factor_scoring.json, written by
-    ml_pipeline/04_model_training.py / 08_factor_analysis.py)."""
-    if "artifact" not in _FACTOR_CACHE:
-        import json
-        path = MODEL_DIR / "factor_scoring.json"
-        _FACTOR_CACHE["artifact"] = (json.loads(path.read_text())
-                                     if path.exists() else None)
-    return _FACTOR_CACHE["artifact"]
 
 
 class OperationalRiskPredictor:
-    """Load a saved pipeline and predict Low/Medium/High risk."""
+    """
+    Load and apply a saved full pipeline to raw organisation records.
 
-    def __init__(self, pipe, features, labels=("Low", "Medium", "High"),
-                 numeric_features=None, rare_category_map=None,
-                 categorical_features=None):
-        self.pipe = pipe
-        self.features = list(features)
-        self.labels = list(labels)
-        self.numeric = set(numeric_features or [])
-        # TRAIN-derived rare categories -> "OTHER_RARE". Persisted by
-        # 04_model_training.py so inference folds exactly the same categories
-        # the model was fitted on (train/serve parity).
-        self.rare_map = dict(rare_category_map or {})
-        # categorical set: explicit if given, else the complement of the
-        # numeric features among the model features (minus the EFA factors,
-        # which are numeric).
-        if categorical_features is not None:
-            self.categorical = set(categorical_features)
-        else:
-            self.categorical = {c for c in self.features
-                                if c not in self.numeric
-                                and not c.startswith("factor_")}
-        self.numeric_list = [c for c in self.features if c in self.numeric]
-        self.categorical_list = [c for c in self.features if c in self.categorical]
+    The predictor does not preprocess records manually. It constructs a raw
+    one-row DataFrame from the API payload and passes it directly to the
+    saved pipeline.
+    """
+
+    def __init__(
+        self,
+        pipeline,
+        predictor_columns,
+        labels=None,
+    ):
+        self.pipeline = pipeline
+        self.predictor_columns = list(predictor_columns)
+        self.labels = list(labels or dc.LABELS)
 
     @classmethod
-    def load(cls, path=None):
-        """Load best model (default) or a given .pkl path."""
-        import json
-        if path is None:
-            meta = json.loads((MODEL_DIR / "model_metadata.json").read_text())
-            best = meta["best_model"]
-            path = MODEL_DIR / f"{best}.pkl"
+    def load(cls, model_path=None):
+        """
+        Load the best saved full pipeline and its feature contract.
+
+        Args:
+            model_path: Optional path to a specific saved pipeline. If omitted,
+                the pipeline recorded as `best_model` in model_metadata.json
+                is loaded.
+        """
+        metadata_path = MODEL_DIR / "model_metadata.json"
+
+        if not metadata_path.exists():
+            raise FileNotFoundError(
+                f"Model metadata not found: {metadata_path}. "
+                "Run 04_model_training.py before loading the predictor."
+            )
+
+        metadata = json.loads(metadata_path.read_text())
+
+        predictor_columns = metadata["features"]
+        labels = metadata.get(
+            "labels",
+            dc.LABELS,
+        )
+
+        if model_path is None:
+            best_model_name = metadata["best_model"]
+            model_path = MODEL_DIR / f"{best_model_name}.pkl"
         else:
-            path = Path(path)
-            try:
-                meta = json.loads((MODEL_DIR / "model_metadata.json").read_text())
-            except Exception:
-                meta = {"labels": ["Low", "Medium", "High"], "features": None}
-        labels = meta.get("labels", ["Low", "Medium", "High"])
-        features = meta.get("features")
-        numeric = meta.get("numeric_features", [])
-        rare_map = meta.get("rare_category_map", {})
-        categorical = meta.get("categorical_features")
-        pipe = joblib.load(path)
-        feats = features or getattr(pipe, "feature_names_in_", None)
-        return cls(pipe, feats, labels, numeric, rare_map, categorical)
+            model_path = Path(model_path)
 
-    def _frame(self, data):
-        """Coerce input into the exact dtypes the pipeline was trained on.
+        if not model_path.exists():
+            raise FileNotFoundError(
+                f"Saved model artefact not found: {model_path}"
+            )
 
-        The cleaning itself is delegated to ``data_contract.apply_serve_transform``
-        so the serving path is literally the SAME code as the training path:
-        numeric coercion, sentinel handling, categorical folding and the
-        TRAIN-derived rare-category grouping.  Any divergence here would mean
-        the deployed model scores rows it was never fitted on.
+        pipeline = joblib.load(model_path)
+
+        return cls(
+            pipeline=pipeline,
+            predictor_columns=predictor_columns,
+            labels=labels,
+        )
+
+    def _to_raw_frame(self, record):
         """
-        if isinstance(data, pd.DataFrame):
-            df = data.copy()
+        Convert a payload dictionary or DataFrame to a raw prediction frame.
+
+        The returned frame contains the same raw predictor columns expected by
+        the saved full pipeline. Missing columns are filled with missing
+        values, which the pipeline is designed to handle.
+        """
+        if isinstance(record, pd.DataFrame):
+            raw_frame = record.copy()
         else:
-            df = pd.DataFrame([dict(data)])
-        for c in self.features:
-            if c not in df.columns:
-                df[c] = pd.NA
-        # factor_* scores are derived from the raw HR items (train/serve parity)
-        self._derive_factors(df)
-        df = dc.apply_serve_transform(df, self.numeric_list, self.categorical_list,
-                                      self.rare_map)
-        return df[self.features]
+            raw_frame = pd.DataFrame([dict(record)])
 
-    def _derive_factors(self, df):
-        """Compute factor_* scores from the raw HR items (train/serve parity).
+        missing_columns = [
+            column
+            for column in self.predictor_columns
+            if column not in raw_frame.columns
+        ]
 
-        The model was trained on EFA factor scores derived from items such as
-        union coverage, collective bargaining, JCC, information sharing and
-        consultation depth; the same scoring coefficients stored in
-        models/saved_models/factor_scoring.json are re-applied here so a raw
-        API payload can never be scored differently from training.
+        for column in missing_columns:
+            raw_frame[column] = np.nan
+
+        return raw_frame[self.predictor_columns]
+
+    def predict(self, record):
         """
-        if not any(c.startswith("factor_") for c in self.features):
-            return
-        art = _factor_artifact()
-        if not art:
-            return
-        import numpy as np
-        X = df.reindex(columns=art["items"]).apply(pd.to_numeric,
-                                                   errors="coerce")
-        for c, codes in art.get("miss_codes", {}).items():
-            if c in X.columns:
-                X[c] = X[c].replace(list(codes), np.nan)
-        med = pd.Series({c: float(v) for c, v in art["medians"].items()})
-        X = X.astype(float).fillna(med)
-        Z = (X - pd.Series({c: float(v) for c, v in art["mean"].items()})) \
-            / pd.Series({c: float(v) for c, v in art["std"].items()})
-        scores = Z.values @ np.asarray(art["weights"], dtype=float)
-        for i, name in enumerate(art["factor_names"]):
-            if name in df.columns:
-                df[name] = scores[:, i]
+        Return the predicted class label and its probability.
 
-    def predict(self, org_data):
-        """Return (risk_level, max_probability)."""
-        df = self._frame(org_data)
-        proba = self.pipe.predict_proba(df)[0]
-        idx = int(proba.argmax())
-        return self.labels[idx], float(proba[idx])
+        Args:
+            record: A dictionary representing one organisation record.
 
-    def predict_proba_dict(self, org_data):
-        """Return {label: probability}."""
-        df = self._frame(org_data)
-        proba = self.pipe.predict_proba(df)[0]
-        return {lab: float(p) for lab, p in zip(self.labels, proba)}
-
-    def predict_batch(self, df):
-        """Return list of predicted labels for a dataframe."""
-        preds = self.pipe.predict(self._frame(df))
-        return [self.labels[int(i)] for i in preds]
-
-    # ------------------------------------------------------------------
-    # Live local SHAP explanation (dashboard "Why?" chart)
-    # ------------------------------------------------------------------
-    def _orig_map(self):
-        """Transformed feature name -> original feature name (same rule as
-        ml_pipeline/07_shap_explanation.py so dashboards stay consistent)."""
-        if getattr(self, "_mapping", None) is not None:
-            return self._mapping
-        t_names = list(self.pipe.named_steps["prep"].get_feature_names_out())
-        feats = sorted(self.features, key=len, reverse=True)
-        mapping = []
-        for t in t_names:
-            raw = t.split("__", 1)[-1]
-            orig = raw
-            for f in feats:
-                if raw == f or raw.startswith(f + "_") or raw.startswith(f):
-                    orig = f
-                    break
-            mapping.append(orig)
-        self._mapping = mapping
-        return mapping
-
-    def _ensure_background(self):
-        """Lazy: mean of the transformed real dataset (cached on the instance).
-
-        Used as the reference point for exact linear SHAP values
-        (contribution_j = coef_j * (x_j - E[x_j])), mirroring what
-        shap.LinearExplainer computes for linear models.
+        Returns:
+            A tuple containing the predicted label and its probability.
         """
-        if getattr(self, "_bg_mean", None) is not None:
-            return
-        import numpy as np
-        import pandas as pd
-        csv = BASE / "data" / "processed" / "wers_operational_risk_merged.csv"
-        df = pd.read_csv(csv, usecols=lambda c: c in set(self.features))
-        frame = self._frame(df)
-        t = self.pipe.named_steps["prep"].transform(frame)
-        if hasattr(t, "toarray"):
-            t = t.toarray()
-        self._bg_mean = np.asarray(t, dtype=float).mean(axis=0)
+        raw_frame = self._to_raw_frame(record)
 
-    def explain(self, org_data, top_k=12):
-        """Local explanation for ONE input, aggregated to original features.
+        probabilities = self.pipeline.predict_proba(raw_frame)[0]
+        predicted_class_index = int(np.argmax(probabilities))
 
-        Explains the predicted class. Returns None on any failure — the
-        prediction path must never depend on explainability.
+        predicted_label = self.pipeline.classes_[predicted_class_index]
+        predicted_probability = float(
+            probabilities[predicted_class_index]
+        )
+
+        return predicted_label, predicted_probability
+
+    def predict_proba_dict(self, record):
+        """
+        Return class probabilities as a dictionary.
+
+        Args:
+            record: A dictionary representing one organisation record.
+
+        Returns:
+            A dictionary mapping each class label to its predicted probability.
+        """
+        raw_frame = self._to_raw_frame(record)
+
+        probabilities = self.pipeline.predict_proba(raw_frame)[0]
+        class_labels = self.pipeline.classes_
+
+        return {
+            str(label): float(probability)
+            for label, probability in zip(
+                class_labels,
+                probabilities,
+            )
+        }
+
+    def predict_batch(self, records):
+        """
+        Return predicted class labels for a batch of organisation records.
+
+        Args:
+            records: A pandas DataFrame containing raw predictor columns.
+
+        Returns:
+            A list of predicted class labels.
+        """
+        raw_frame = self._to_raw_frame(records)
+
+        predictions = self.pipeline.predict(raw_frame)
+
+        return [str(prediction) for prediction in predictions]
+
+    def explain(self, record, top_k=12):
+        """
+        Return a local SHAP explanation for one organisation record.
+
+        The explanation uses the saved pipeline's preprocessing steps and the
+        fitted classifier. It explains the predicted class and aggregates
+        transformed-feature contributions to original predictor columns.
+
+        The method returns None if explanation fails. Prediction must never
+        depend on explanation.
         """
         try:
-            import numpy as np
-            frame = self._frame(org_data)
-            clf = self.pipe.named_steps["clf"]
-            prep = self.pipe.named_steps["prep"]
-            proba = self.pipe.predict_proba(frame)[0]
-            k = int(proba.argmax())
-            t = prep.transform(frame)
-            if hasattr(t, "toarray"):
-                t = t.toarray()
-            x = np.asarray(t, dtype=float)[0]
+            raw_frame = self._to_raw_frame(record)
 
-            if hasattr(clf, "coef_"):          # exact linear SHAP (logreg)
-                self._ensure_background()
-                coef = np.asarray(clf.coef_, dtype=float)
-                inter = np.asarray(clf.intercept_, dtype=float).reshape(-1)
-                if coef.shape[0] == 1 and len(self.labels) == 2:
-                    row_coef = coef[0] if k == 1 else -coef[0]
-                    base = (float(inter[0]) if k == 1 else -float(inter[0])) \
-                        + float(row_coef @ self._bg_mean)
-                else:
-                    row_coef = coef[k]
-                    base = float(inter[k]) + float(row_coef @ self._bg_mean)
-                contrib = row_coef * (x - self._bg_mean)
-            else:                              # tree/other: best-effort via shap
-                import shap
-                expl = shap.TreeExplainer(clf)
-                sv = expl.shap_values(t)
-                if isinstance(sv, list):
-                    arr = np.stack(sv, axis=-1)[0]
-                else:
-                    arr = np.asarray(sv, dtype=float)
-                    arr = arr[0] if arr.ndim == 2 else arr[0]
-                contrib = arr[:, k] if arr.ndim == 2 else arr
-                ev = np.asarray(getattr(expl, "expected_value", 0.0)).reshape(-1)
-                base = float(ev[k]) if ev.size > k else float(ev[0])
+            preprocessing_pipeline = self.pipeline[:-1]
+            transformed_record = preprocessing_pipeline.transform(raw_frame)
 
-            agg = {}
-            for orig, v in zip(self._orig_map(), np.asarray(contrib, dtype=float)):
-                agg[orig] = agg.get(orig, 0.0) + float(v)
-            row_vals = frame.iloc[0]
-            items = sorted(agg.items(), key=lambda kv: abs(kv[1]), reverse=True)[:top_k]
+            classifier = self.pipeline.named_steps["classifier"]
+            preprocessing_step = self.pipeline.named_steps["preprocessing"]
+
+            transformed_feature_names = list(
+                preprocessing_step.get_feature_names_out()
+            )
+
+            probabilities = self.pipeline.predict_proba(raw_frame)[0]
+            predicted_class_index = int(np.argmax(probabilities))
+
+            import shap
+
+            if (
+                hasattr(classifier, "estimators_")
+                or type(classifier).__name__ in (
+                    "XGBClassifier",
+                    "LGBMClassifier",
+                )
+            ):
+                explainer = shap.TreeExplainer(classifier)
+                shap_values = explainer.shap_values(transformed_record)
+
+            elif hasattr(classifier, "coef_"):
+                explainer = shap.LinearExplainer(
+                    classifier,
+                    transformed_record,
+                )
+                shap_values = explainer.shap_values(transformed_record)
+
+            else:
+                explainer = shap.Explainer(
+                    classifier.predict_proba,
+                    transformed_record,
+                )
+                shap_values = explainer(transformed_record).values
+
+            shap_array = np.asarray(shap_values, dtype=float)
+
+            if shap_array.ndim == 2:
+                shap_array = shap_array[:, :, np.newaxis]
+
+            if shap_array.ndim == 3:
+                class_contributions = shap_array[
+                    0,
+                    :,
+                    predicted_class_index,
+                ]
+            else:
+                class_contributions = shap_array[0]
+
+            expected_value = np.asarray(
+                getattr(explainer, "expected_value", 0.0)
+            ).reshape(-1)
+
+            if expected_value.size > predicted_class_index:
+                base_value = float(
+                    expected_value[predicted_class_index]
+                )
+            else:
+                base_value = float(expected_value[0])
+
+            original_feature_mapping = [
+                self._map_transformed_feature_to_original(
+                    transformed_feature_name
+                )
+                for transformed_feature_name in transformed_feature_names
+            ]
+
+            contributions_by_original_feature = {}
+
+            for original_feature, contribution in zip(
+                original_feature_mapping,
+                class_contributions,
+            ):
+                contributions_by_original_feature[original_feature] = (
+                    contributions_by_original_feature.get(
+                        original_feature,
+                        0.0,
+                    )
+                    + float(contribution)
+                )
+
+            top_contributions = sorted(
+                contributions_by_original_feature.items(),
+                key=lambda item: abs(item[1]),
+                reverse=True,
+            )[:top_k]
+
+            example_record = raw_frame.iloc[0].to_dict()
+
             return {
-                "model": type(clf).__name__,
-                "class_explained": self.labels[k],
-                "base_value": round(base, 5),
-                "output": round(base + float(np.sum(contrib)), 5),
+                "model": type(classifier).__name__,
+                "class_explained": self.pipeline.classes_[
+                    predicted_class_index
+                ],
+                "base_value": round(base_value, 5),
+                "output": round(
+                    base_value + float(np.sum(class_contributions)),
+                    5,
+                ),
                 "contributions": [
-                    {"feature": f, "shap": round(v, 5),
-                     "value": str(row_vals.get(f, ""))} for f, v in items],
+                    {
+                        "feature": feature,
+                        "shap": round(contribution, 5),
+                        "value": str(
+                            example_record.get(feature, "")
+                        ),
+                    }
+                    for feature, contribution in top_contributions
+                ],
             }
+
         except Exception:
             return None
+
+    def _map_transformed_feature_to_original(
+        self,
+        transformed_feature_name,
+    ):
+        """
+        Map a transformed feature name to its original predictor column.
+
+        Numeric transformed features retain their original names. One-hot
+        encoded categorical features use the form `column_value`.
+        """
+        if transformed_feature_name in self.predictor_columns:
+            return transformed_feature_name
+
+        categorical_columns = [
+            column
+            for column in self.predictor_columns
+            if column not in self.pipeline.named_steps[
+                "preprocessing"
+            ].transformers_[0][2]
+        ]
+
+        for column in sorted(
+            categorical_columns,
+            key=len,
+            reverse=True,
+        ):
+            if transformed_feature_name == column:
+                return column
+
+            if transformed_feature_name.startswith(f"{column}_"):
+                return column
+
+        return transformed_feature_name

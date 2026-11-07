@@ -123,7 +123,10 @@ _CODE = dict(ge=0, le=99)
 
 
 class OperationalRiskInput(BaseModel):
-    """Strict request schema for /predict, /simulate, /whatif."""
+    """Strict request schema for /predict, /simulate, /whatif.
+
+    Implements semantic constraints beyond type checking (reviewer Fix 12).
+    """
 
     model_config = ConfigDict(extra="ignore", str_strip_whitespace=True)
 

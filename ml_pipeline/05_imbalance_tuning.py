@@ -1,249 +1,533 @@
-"""05_imbalance_tuning.py — advanced imbalance handling & tuning (spec 2).
-
-Adds to the base comparison from 04_model_training.py:
-  * logreg_smoteenn  — SMOTEENN resampling + balanced logistic regression
-  * rf_smoteenn      — SMOTEENN + Random Forest
-  * xgboost_tuned    — RandomizedSearchCV (stratified 5-fold) over an
-                       imblearn pipeline (prep -> SMOTEENN -> XGB)
-  * stacked_ensemble — StackingClassifier (RF + XGB + LGBM -> logistic meta)
-                       inside the same resampling pipeline
-
-Evaluates on the SAME stratified 80/20 split as 04 (random_state=42) so rows
-are directly comparable.  Appends to results/tables/model_comparison.csv,
-saves pkls, and promotes a new best model if balanced accuracy improves.
 """
+05_imbalance_tuning.py — Advanced imbalance handling and hyperparameter tuning.
+
+This script evaluates imbalance-aware variants using the same canonical
+outer train-test partition as 04_model_training.py.
+
+The saved pipelines contain the complete inference workflow:
+
+    Categorical cleaning -> numeric coercion -> rare-category grouping
+    -> EFA -> preprocessing -> SMOTEENN/SMOTE -> classifier
+
+Therefore, this script passes raw predictor matrices directly to the
+pipelines. All preprocessing and resampling are fitted only on the relevant
+training data.
+
+The held-out test partition is used only for reporting. It is not used to
+select or promote a deployed model.
+"""
+
 from pathlib import Path
 import json
 import sys
 import warnings
-warnings.filterwarnings("ignore")
 
 import joblib
 import numpy as np
 import pandas as pd
-from sklearn.compose import ColumnTransformer
-from sklearn.ensemble import RandomForestClassifier, StackingClassifier
-from sklearn.impute import SimpleImputer
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import (accuracy_score, balanced_accuracy_score, f1_score,
-                             classification_report, confusion_matrix)
-from sklearn.model_selection import (RandomizedSearchCV, StratifiedKFold,
-                                     train_test_split)
-from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
-from sklearn.neural_network import MLPClassifier  # noqa: F401 (kept for parity)
+
 from imblearn.over_sampling import SMOTE
 from imblearn.combine import SMOTEENN
-from imblearn.pipeline import Pipeline as ImbPipeline
+from imblearn.pipeline import Pipeline as ImbalancedPipeline
+
+from sklearn.compose import ColumnTransformer
+from sklearn.ensemble import (
+    RandomForestClassifier,
+    StackingClassifier,
+)
+from sklearn.impute import SimpleImputer
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import (
+    accuracy_score,
+    balanced_accuracy_score,
+    classification_report,
+    confusion_matrix,
+    f1_score,
+)
+from sklearn.model_selection import (
+    RandomizedSearchCV,
+    StratifiedKFold,
+)
+from sklearn.neural_network import MLPClassifier  # noqa: F401
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
 try:
     from xgboost import XGBClassifier
     HAS_XGB = True
 except Exception:
     HAS_XGB = False
+
 try:
     from lightgbm import LGBMClassifier
     HAS_LGBM = True
 except Exception:
     HAS_LGBM = False
 
+
+warnings.filterwarnings("ignore")
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import data_contract as dc  # noqa: E402
+
+
 BASE = Path(__file__).resolve().parent.parent
 DATA = BASE / "data" / "processed" / "wers_operational_risk_merged.csv"
 MODEL_DIR = BASE / "models" / "saved_models"
 META_JSON = MODEL_DIR / "model_metadata.json"
 TABLE_DIR = BASE / "results" / "tables"
-FIG_DIR = BASE / "results" / "figures"
 
-TARGET = "operational_risk_category"
-SCORE_COL = "operational_risk_score"
-ID_COLS = ["serno", "year", "weight"]
-LEAKAGE = ["employee_turnover_rate", "employee_turnover_rate_5yr",
-           "absenteeism_rate", "grievance_rate", "grievance_procedure_formal",
-           "training_problems", "skill_shortage_reported", "disputes_raised",
-           "dispute_risk_level", "other_industrial_action", "dismissal_rate",
-           "disciplinary_warnings", "suspensions", SCORE_COL]
-LABELS = ["Low", "Medium", "High"]
-RS = 42
+TABLE_DIR.mkdir(parents=True, exist_ok=True)
+
+TARGET = dc.TARGET
+LABELS = dc.LABELS
+RANDOM_STATE = dc.RANDOM_STATE
+N_SPLITS = dc.N_SPLITS
+TEST_SIZE = dc.TEST_SIZE
+
 
 print("=" * 78)
-print("IMBALANCE HANDLING + HYPERPARAMETER TUNING + STACKING (spec 2)")
+print("IMBALANCE HANDLING, HYPERPARAMETER TUNING AND STACKING")
 print("=" * 78)
 
-# ---- feature contract: reuse the exact leakage-safe feature list that
-# 04_model_training.py wrote to model_metadata.json (33 raw + 4 EFA factors)
-# so the imbalance variants are trained on identical inputs. The list is
-# taken verbatim from the metadata contract -- the EFA factor columns are NOT
-# present in the raw CSV, so they must not be filtered against it.
-meta = json.loads(META_JSON.read_text()) if META_JSON.exists() else {}
-if "features" in meta:
-    feats = list(meta["features"])
-else:
-    df = pd.read_csv(DATA)
-    feats = [c for c in df.columns
-             if c not in ID_COLS + LEAKAGE + [TARGET]]
-    for _d in ("industry_code", "industry_code_80"):
-        if _d in feats:
-            feats.remove(_d)
 
-# ---- canonical frames (data_contract) -----------------------------------
-# 05 must tune the imbalance variants on EXACTLY the same train/test rows and
-# the same preprocessing as 04 (and therefore as 06/07). Previously this
-# script cleaned the whole frame and only then split, which meant the test
-# rows were grouped with training rows before the rare-category grouping and
-# the split was applied to already-cleaned data. The contract removes that
-# divergence: split first, clean second, rare categories derived on train only.
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import efa_tools  # noqa: E402
-import data_contract as dc  # noqa: E402
+# ---------------------------------------------------------------------------
+# Load metadata and reconstruct the canonical outer partition
+# ---------------------------------------------------------------------------
 
-FRAMES = dc.build_model_frames()
-Xtr, Xte = FRAMES["Xtr"], FRAMES["Xte"]
-ytr, yte = FRAMES["ytr"], FRAMES["yte"]
-num_cols = [c for c in FRAMES["num_cols"] if c in feats]
-cat_cols = [c for c in FRAMES["cat_cols"] if c in feats]
-assert list(FRAMES["features"]) == list(feats), (
-    "data_contract features differ from model_metadata.json features: "
-    f"{set(FRAMES['features']) ^ set(feats)}")
-print(f"Feature contract: {len(feats)} features "
-      f"({len(FRAMES['factor_names'])} EFA factors: {FRAMES['factor_names']})")
+if not META_JSON.exists():
+    raise FileNotFoundError(
+        f"Model metadata not found: {META_JSON}. "
+        "Run 04_model_training.py before running imbalance tuning."
+    )
 
-preprocess = ColumnTransformer([
-    ("num", Pipeline([("imp", SimpleImputer(strategy="median")),
-                      ("sc", StandardScaler())]), num_cols),
-    ("cat", Pipeline([("imp", SimpleImputer(strategy="most_frequent")),
-                      ("oh", OneHotEncoder(handle_unknown="ignore",
-                                           sparse_output=False))]), cat_cols),
-])
+metadata = json.loads(META_JSON.read_text())
 
-print(f"Train {len(Xtr)} / Test {len(Xte)} | features {len(feats)} "
-      f"({len(num_cols)} num, {len(cat_cols)} cat)")
+TARGET = metadata["target"]
+LABELS = metadata["labels"]
+PREDICTOR_COLUMNS = metadata["features"]
 
-results, fitted = {}, {}
+df = pd.read_csv(DATA)
 
-models = {}
-models["logreg_smoteenn"] = ImbPipeline([
-    ("prep", preprocess), ("resample", SMOTEENN(random_state=RS)),
-    ("clf", LogisticRegression(max_iter=2000, class_weight="balanced",
-                               random_state=RS))])
-models["rf_smoteenn"] = ImbPipeline([
-    ("prep", preprocess), ("resample", SMOTEENN(random_state=RS)),
-    ("clf", RandomForestClassifier(n_estimators=150, class_weight="balanced",
-                                   random_state=RS, n_jobs=-1))])
+Xtr_raw, Xte_raw, ytr, yte = dc.split_dataset(
+    df,
+    PREDICTOR_COLUMNS,
+    target_column=TARGET,
+)
+
+Xtr_raw = Xtr_raw.copy()
+Xte_raw = Xte_raw.copy()
+
+print(f"Outer training partition: {Xtr_raw.shape}")
+print(f"Outer held-out test partition: {Xte_raw.shape}")
+print("Training class distribution:", ytr.value_counts().to_dict())
+print("Test class distribution:", yte.value_counts().to_dict())
+
+if list(Xtr_raw.columns) != list(PREDICTOR_COLUMNS):
+    raise ValueError(
+        "Predictor columns in the reconstructed training partition do not "
+        "match the feature contract in model_metadata.json."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Identify numeric and categorical columns from outer training data
+# ---------------------------------------------------------------------------
+
+numeric_candidates = []
+categorical_candidates = []
+
+for column in Xtr_raw.columns:
+    series = Xtr_raw[column].replace(dc.MISS_TOKENS, np.nan)
+    coerced = pd.to_numeric(series, errors="coerce")
+
+    valid_count = series.notna().sum()
+    numeric_ratio = (
+        coerced.notna().sum() / valid_count
+        if valid_count > 0
+        else 0
+    )
+
+    if numeric_ratio > 0.85 and coerced.nunique(dropna=True) > 12:
+        numeric_candidates.append(column)
+    else:
+        categorical_candidates.append(column)
+
+print(f"Numeric candidate columns: {len(numeric_candidates)}")
+print(f"Categorical candidate columns: {len(categorical_candidates)}")
+
+
+# ---------------------------------------------------------------------------
+# Preprocessing configuration
+# ---------------------------------------------------------------------------
+
+preprocess = ColumnTransformer(
+    transformers=[
+        (
+            "num",
+            Pipeline([
+                ("imputer", SimpleImputer(strategy="median")),
+                ("scaler", StandardScaler()),
+            ]),
+            numeric_candidates,
+        ),
+        (
+            "cat",
+            Pipeline([
+                ("imputer", SimpleImputer(strategy="most_frequent")),
+                (
+                    "encoder",
+                    OneHotEncoder(
+                        handle_unknown="ignore",
+                        sparse_output=False,
+                    ),
+                ),
+            ]),
+            categorical_candidates,
+        ),
+    ],
+    verbose_feature_names_out=False,
+)
+
+# Replace ColumnTransformer with DynamicColumnTransformer for consistency
+preprocess = dc.DynamicColumnTransformer()
+
+
+# ---------------------------------------------------------------------------
+# Imbalance-aware pipelines
+# ---------------------------------------------------------------------------
+
+def build_imbalanced_pipeline(classifier, resampler):
+    """Build a complete imbalance-aware pipeline using raw input data."""
+    return ImbalancedPipeline(
+        steps=[
+            (
+                "categorical_cleaning",
+                dc.CategoricalCleaningTransformer(),
+            ),
+            (
+                "numeric_coercion",
+                dc.NumericCoercionTransformer(),
+            ),
+            (
+                "rare_category",
+                dc.RareCategoryTransformer(
+                    threshold=dc.RARE_THRESHOLD,
+                    random_state=RANDOM_STATE,
+                ),
+            ),
+            (
+                "efa",
+                dc.EFATransformer(
+                    random_state=RANDOM_STATE,
+                ),
+            ),
+            ("preprocessing", preprocess),
+            ("resampler", resampler),
+            ("classifier", classifier),
+        ]
+    )
+
+
+models = {
+    "logreg_smoteenn": build_imbalanced_pipeline(
+        classifier=LogisticRegression(
+            max_iter=2000,
+            class_weight="balanced",
+            random_state=RANDOM_STATE,
+        ),
+        resampler=SMOTEENN(random_state=RANDOM_STATE),
+    ),
+    "rf_smoteenn": build_imbalanced_pipeline(
+        classifier=RandomForestClassifier(
+            n_estimators=150,
+            class_weight="balanced_subsample",
+            random_state=RANDOM_STATE,
+            n_jobs=-1,
+        ),
+        resampler=SMOTEENN(random_state=RANDOM_STATE),
+    ),
+    "logreg_smote": build_imbalanced_pipeline(
+        classifier=LogisticRegression(
+            max_iter=2000,
+            class_weight="balanced",
+            random_state=RANDOM_STATE,
+        ),
+        resampler=SMOTE(
+            random_state=RANDOM_STATE,
+            k_neighbors=3,
+        ),
+    ),
+}
+
 if HAS_XGB:
-    models["xgboost_tuned"] = ImbPipeline([
-        ("prep", preprocess), ("resample", SMOTEENN(random_state=RS)),
-        ("clf", XGBClassifier(n_estimators=300, eval_metric="mlogloss",
-                              random_state=RS, n_jobs=2))])
+    models["xgboost_tuned"] = build_imbalanced_pipeline(
+        classifier=XGBClassifier(
+            n_estimators=300,
+            eval_metric="mlogloss",
+            random_state=RANDOM_STATE,
+            n_jobs=2,
+        ),
+        resampler=SMOTEENN(random_state=RANDOM_STATE),
+    )
+
 if HAS_XGB and HAS_LGBM:
-    stacking = StackingClassifier(
+    stacking_classifier = StackingClassifier(
         estimators=[
-            ("rf", RandomForestClassifier(n_estimators=100,
-                                          class_weight="balanced",
-                                          random_state=RS, n_jobs=-1)),
-            ("xgb", XGBClassifier(n_estimators=150, eval_metric="mlogloss",
-                                  random_state=RS, n_jobs=2)),
-            ("lgbm", LGBMClassifier(n_estimators=150, random_state=RS,
-                                    verbose=-1)),
+            (
+                "random_forest",
+                RandomForestClassifier(
+                    n_estimators=100,
+                    class_weight="balanced_subsample",
+                    random_state=RANDOM_STATE,
+                    n_jobs=-1,
+                ),
+            ),
+            (
+                "xgboost",
+                XGBClassifier(
+                    n_estimators=150,
+                    eval_metric="mlogloss",
+                    random_state=RANDOM_STATE,
+                    n_jobs=2,
+                ),
+            ),
+            (
+                "lightgbm",
+                LGBMClassifier(
+                    n_estimators=150,
+                    random_state=RANDOM_STATE,
+                    verbose=-1,
+                ),
+            ),
         ],
-        final_estimator=LogisticRegression(max_iter=2000,
-                                           class_weight="balanced",
-                                           random_state=RS),
-        cv=5, n_jobs=-1)          # stratified 5-fold (spec 3.4)
-    models["stacked_ensemble"] = ImbPipeline([
-        ("prep", preprocess), ("resample", SMOTEENN(random_state=RS)),
-        ("clf", stacking)])
+        final_estimator=LogisticRegression(
+            max_iter=2000,
+            class_weight="balanced",
+            random_state=RANDOM_STATE,
+        ),
+        cv=StratifiedKFold(
+            n_splits=N_SPLITS,
+            shuffle=True,
+            random_state=RANDOM_STATE,
+        ),
+        n_jobs=-1,
+    )
 
-# plain SMOTE variant (spec 3.2 mentions both SMOTE and SMOTEENN)
-models["logreg_smote"] = ImbPipeline([
-    ("prep", preprocess),
-    ("resample", SMOTE(random_state=RS, k_neighbors=3)),
-    ("clf", LogisticRegression(max_iter=2000, class_weight="balanced",
-                               random_state=RS))])
+    models["stacked_ensemble"] = build_imbalanced_pipeline(
+        classifier=stacking_classifier,
+        resampler=SMOTEENN(random_state=RANDOM_STATE),
+    )
 
-# ---- RandomizedSearchCV (spec 3.4: stratified 5-fold, balanced accuracy) --
+
+# ---------------------------------------------------------------------------
+# Randomized search for XGBoost
+# ---------------------------------------------------------------------------
+
 if HAS_XGB:
-    print("\nRandomizedSearchCV on xgboost_tuned (iter=8, cv=5, stratified)...")
-    search_pipe = ImbPipeline([
-        ("prep", preprocess), ("resample", SMOTEENN(random_state=RS)),
-        ("clf", XGBClassifier(eval_metric="mlogloss", random_state=RS,
-                              n_jobs=2))])
-    grid = {
-        "clf__n_estimators": [150, 300, 450],
-        "clf__max_depth": [3, 5, 7],
-        "clf__learning_rate": [0.03, 0.1, 0.2],
-        "clf__subsample": [0.7, 0.9, 1.0],
-        "clf__colsample_bytree": [0.7, 0.9, 1.0],
-    }
-    try:
-        search = RandomizedSearchCV(
-            search_pipe, grid, n_iter=8,
-            cv=StratifiedKFold(5, shuffle=True, random_state=RS),
-            scoring="balanced_accuracy", random_state=RS, n_jobs=2,
-            refit=True, verbose=0)
-        search.fit(Xtr, ytr)
-        models["xgboost_tuned"] = search.best_estimator_
-        print(f"  best params: {json.dumps(search.best_params_, default=str)}")
-        print(f"  best CV balanced_accuracy: {search.best_score_:.3f}")
-    except Exception as e:
-        print(f"  search failed ({e}); keeping default xgboost_tuned")
+    print(
+        "\nRandomizedSearchCV for XGBoost: "
+        f"{N_SPLITS}-fold stratified CV, balanced accuracy objective"
+    )
 
-# ---- fit + evaluate on the shared held-out split --------------------------
-for name, pipe in models.items():
-    print(f"\n--- {name} ---")
+    search_pipeline = build_imbalanced_pipeline(
+        classifier=XGBClassifier(
+            eval_metric="mlogloss",
+            random_state=RANDOM_STATE,
+            n_jobs=2,
+        ),
+        resampler=SMOTEENN(random_state=RANDOM_STATE),
+    )
+
+    parameter_distributions = {
+        "classifier__n_estimators": [150, 300, 450],
+        "classifier__max_depth": [3, 5, 7],
+        "classifier__learning_rate": [0.03, 0.10, 0.20],
+        "classifier__subsample": [0.70, 0.90, 1.00],
+        "classifier__colsample_bytree": [0.70, 0.90, 1.00],
+    }
+
     try:
-        pipe.fit(Xtr, ytr)
-        pred = pipe.predict(Xte)
-        acc = accuracy_score(yte, pred)
-        bal = balanced_accuracy_score(yte, pred)
-        f1m = f1_score(yte, pred, average="macro", zero_division=0)
-        print(f"TEST acc={acc:.3f} bal_acc={bal:.3f} f1_macro={f1m:.3f}")
-        print(classification_report(yte, pred, target_names=LABELS,
-                                    zero_division=0))
-        fitted[name] = pipe
-        results[name] = {"accuracy": acc, "balanced_accuracy": bal,
-                         "f1_macro": f1m,
-                         "confusion_matrix": confusion_matrix(yte, pred).tolist()}
-        joblib.dump(pipe, MODEL_DIR / f"{name}.pkl")
-    except Exception as e:
-        print(f"FAILED: {e}")
+        random_search = RandomizedSearchCV(
+            estimator=search_pipeline,
+            param_distributions=parameter_distributions,
+            n_iter=8,
+            cv=StratifiedKFold(
+                n_splits=N_SPLITS,
+                shuffle=True,
+                random_state=RANDOM_STATE,
+            ),
+            scoring="balanced_accuracy",
+            random_state=RANDOM_STATE,
+            n_jobs=2,
+            refit=True,
+            verbose=0,
+        )
+
+        random_search.fit(Xtr_raw, ytr)
+
+        models["xgboost_tuned"] = random_search.best_estimator_
+
+        print(
+            "Best parameters: "
+            f"{json.dumps(random_search.best_params_, default=str)}"
+        )
+        print(
+            "Best cross-validated balanced accuracy: "
+            f"{random_search.best_score_:.3f}"
+        )
+
+    except Exception as error:
+        print(f"Randomized search failed: {error}")
+        print("Retaining the default XGBoost configuration.")
+
+
+# ---------------------------------------------------------------------------
+# Fit and evaluate imbalance-aware variants
+# ---------------------------------------------------------------------------
+
+results = {}
+fitted_pipelines = {}
+
+for model_name, pipeline in models.items():
+    print(f"\n--- {model_name} ---")
+
+    try:
+        pipeline.fit(Xtr_raw, ytr)
+        predictions = pipeline.predict(Xte_raw)
+
+        accuracy = accuracy_score(yte, predictions)
+        balanced_accuracy = balanced_accuracy_score(yte, predictions)
+        macro_f1 = f1_score(
+            yte,
+            predictions,
+            average="macro",
+            zero_division=0,
+        )
+
+        print(
+            f"Held-out test accuracy={accuracy:.3f}, "
+            f"balanced accuracy={balanced_accuracy:.3f}, "
+            f"macro-F1={macro_f1:.3f}"
+        )
+
+        print(
+            classification_report(
+                yte,
+                predictions,
+                target_names=LABELS,
+                zero_division=0,
+            )
+        )
+
+        fitted_pipelines[model_name] = pipeline
+
+        results[model_name] = {
+            "accuracy": accuracy,
+            "balanced_accuracy": balanced_accuracy,
+            "f1_macro": macro_f1,
+            "confusion_matrix": confusion_matrix(
+                yte,
+                predictions
+            ).tolist(),
+        }
+
+        joblib.dump(
+            pipeline,
+            MODEL_DIR / f"{model_name}.pkl",
+        )
+
+    except Exception as error:
+        print(f"{model_name} failed: {error}")
 
 if not results:
-    raise SystemExit("No models trained successfully.")
+    raise SystemExit("No imbalance-aware models trained successfully.")
 
-# ---- append to the 04 comparison table ------------------------------------
-comp_path = TABLE_DIR / "model_comparison.csv"
-comp = pd.read_csv(comp_path) if comp_path.exists() else pd.DataFrame()
+
+# ---------------------------------------------------------------------------
+# Append results to the model-comparison table
+# ---------------------------------------------------------------------------
+
+comparison_path = TABLE_DIR / "model_comparison.csv"
+
+if comparison_path.exists():
+    comparison_table = pd.read_csv(comparison_path)
+else:
+    comparison_table = pd.DataFrame()
+
 new_rows = []
-for n, r in results.items():
-    new_rows.append({"model": n, "test_accuracy": r["accuracy"],
-                     "test_balanced_accuracy": r["balanced_accuracy"],
-                     "test_f1_macro": r["f1_macro"],
-                     "cv_test_accuracy": np.nan,
-                     "cv_test_balanced_accuracy": np.nan,
-                     "cv_test_f1_macro": np.nan})
-comp = pd.concat([comp, pd.DataFrame(new_rows)], ignore_index=True)
-comp = comp.drop_duplicates(subset=["model"], keep="last")
-comp = comp.sort_values("test_balanced_accuracy", ascending=False)
-comp.to_csv(comp_path, index=False)
-print(f"\nUpdated {comp_path}")
 
-# ---- report imbalance variants (do NOT re-select the deployed model) -------
-# Best-model selection happens ONLY in 04_model_training.py, by *training*
-# 5-fold CV balanced accuracy; the held-out test split is reported but never
-# used for selection. Promoting here would leak test data into model choice
-# and could swap the linear deployed model for a tree ensemble, breaking the
-# exact local-SHAP contract (contribution = coef . (x - E[x])). So each
-# imbalance variant's test balanced accuracy is recorded for the comparison
-# table/figure and `best_model` is left exactly as 04 selected it.
-mdl_path = MODEL_DIR / "model_metadata.json"
-mdl = json.loads(mdl_path.read_text())
-mdl.setdefault("all_test_balanced_accuracy", {}).update(
-    {n: r["balanced_accuracy"] for n, r in results.items()})
-cur_best = mdl["best_model"]
-top_variant = max(results, key=lambda n: results[n]["balanced_accuracy"])
-print(f">>> deployed best model unchanged: {cur_best} (selected by training "
-      f"CV in 04); best imbalance variant {top_variant} "
-      f"test bal_acc={results[top_variant]['balanced_accuracy']:.3f} "
-      f"reported only")
-mdl_path.write_text(json.dumps(mdl, indent=2))
-print("DONE. Next: python 06_model_evaluation.py && python 07_shap_explanation.py")
+for model_name, result in results.items():
+    new_rows.append(
+        {
+            "model": model_name,
+            "test_accuracy": result["accuracy"],
+            "test_balanced_accuracy": result["balanced_accuracy"],
+            "test_f1_macro": result["f1_macro"],
+            "cv_test_accuracy": np.nan,
+            "cv_test_balanced_accuracy": np.nan,
+            "cv_test_f1_macro": np.nan,
+        }
+    )
+
+comparison_table = pd.concat(
+    [comparison_table, pd.DataFrame(new_rows)],
+    ignore_index=True,
+)
+
+comparison_table = comparison_table.drop_duplicates(
+    subset=["model"],
+    keep="last",
+)
+
+comparison_table = comparison_table.sort_values(
+    by="test_balanced_accuracy",
+    ascending=False,
+)
+
+comparison_table.to_csv(comparison_path, index=False)
+
+print(f"\nUpdated {comparison_path}")
+
+
+# ---------------------------------------------------------------------------
+# Update metadata without changing the deployed model
+# ---------------------------------------------------------------------------
+
+metadata_path = MODEL_DIR / "model_metadata.json"
+updated_metadata = json.loads(metadata_path.read_text())
+
+updated_metadata.setdefault(
+    "all_test_balanced_accuracy",
+    {}
+).update(
+    {
+        model_name: result["balanced_accuracy"]
+        for model_name, result in results.items()
+    }
+)
+
+deployed_model = updated_metadata["best_model"]
+
+best_variant = max(
+    results,
+    key=lambda model_name: results[model_name]["balanced_accuracy"],
+)
+
+print(
+    f"\nDeployed model unchanged: {deployed_model} "
+    "(selected using training cross-validated balanced accuracy in "
+    "04_model_training.py)"
+)
+
+print(
+    f"Best imbalance-aware variant by held-out test balanced accuracy: "
+    f"{best_variant} "
+    f"({results[best_variant]['balanced_accuracy']:.3f})"
+)
+
+with open(metadata_path, "w") as file:
+    json.dump(updated_metadata, file, indent=2)
+
+print("\nDONE. Next: python 06_model_evaluation.py")

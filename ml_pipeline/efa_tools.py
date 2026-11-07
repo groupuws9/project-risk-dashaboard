@@ -29,13 +29,23 @@ from scipy import stats
 
 # HR / employee-relations practice items expected to co-load on latent
 # constructs such as "employee voice" and "formal HR strategy".
-ITEMS = ["union_coverage_pct", "collective_bargaining", "bargaining_level_org",
-         "bargaining_level_est", "formal_hr_strategy",
-         "performance_appraisal_pct", "training_budget_exists",
-         "job_security_policy", "jcc_exists", "jcc_frequency",
-         "information_sharing_score", "consultation_depth",
-         "employee_voice_channels", "grievance_procedure_formal",
-         "info_chain_exist", "newsletter_exists"]
+ITEMS = [
+    "union_coverage_pct",
+    "collective_bargaining",
+    "bargaining_level_org",
+    "bargaining_level_est",
+    "formal_hr_strategy",
+    "performance_appraisal_pct",
+    "training_budget_exists",
+    "job_security_policy",
+    "jcc_exists",
+    "jcc_frequency",
+    "information_sharing_score",
+    "consultation_depth",
+    "employee_voice_channels",
+    "info_chain_exist",
+    "newsletter_exists",
+]
 
 # Survey non-response codes for the coded (1..7 scale) items.
 MISS_CODES = (9, 99, 999)
@@ -72,13 +82,11 @@ def _parallel_analysis(n, p, eig, rng):
 
 
 def fit(df, items=None):
-    """Fit the EFA on the full sample.
+    """Fit EFA on the supplied training data.
 
-    Returns (artifact, diagnostics):
-      artifact     — JSON-serialisable scoring contract (items, medians,
-                     mean/std standardisation, rotated loading weights)
-      diagnostics  — in-memory objects for reporting (loadings, eigenvalues,
-                     KMO, Bartlett, parallel-analysis thresholds)
+    During cross-validation, this function is called within each CV training
+    fold. The resulting artifact is used only to score the corresponding
+    validation fold. It must not be fitted using validation or test data.
     """
     from statsmodels.multivariate.factor import Factor
     from statsmodels.multivariate.factor_rotation import rotate_factors
@@ -193,15 +201,4 @@ def load(path):
     return json.loads(Path(path).read_text())
 
 
-def ensure(df, artifact_path=None):
-    """Return (df_with_factor_columns, artifact).
 
-    Loads the saved artifact when available (exact training-time scoring);
-    otherwise fits on this df. Deterministic either way.
-    """
-    art = None
-    if artifact_path and Path(artifact_path).exists():
-        art = load(artifact_path)
-    if art is None:
-        art, _ = fit(df)
-    return pd.concat([df, transform(df, art)], axis=1), art

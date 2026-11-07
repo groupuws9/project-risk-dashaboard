@@ -65,3 +65,32 @@ def test_validate_payload_returns_extras(valid_payload):
 def test_validate_payload_non_dict():
     _, body, status, _ = validate_payload(["nope"])
     assert status == 400 and body["code"] == "MALFORMED_JSON"
+
+
+def test_invalid_category_is_rejected():
+    """Invalid categorical values should be rejected with OUT_OF_RANGE (reviewer Fix 12)."""
+    with pytest.raises(ValidationError):
+        OperationalRiskInput(
+            sector=1, org_size_category_3=2, multinational=2,
+            union_coverage_pct=30, collective_bargaining=999,  # Invalid: out of range
+            performance_appraisal_pct=3, jcc_exists=2,
+            information_sharing_score=3, pct_part_time=20,
+            pct_temporary=5)
+
+
+def test_validation_error_returns_400():
+    """Validation errors should return 400 status (reviewer Fix 13)."""
+    from dashboard.validation import error_body
+    body, status = error_body("MISSING_FIELD", "Missing required field", field="sector")
+    assert status == 400
+    assert body["code"] == "MISSING_FIELD"
+
+
+def test_feature_names_match_training():
+    """Feature names in validation must match training features (reviewer Fix 14)."""
+    raw = _model_raw_features()
+    # Ensure MODEL_FEATURES matches the training contract
+    assert set(MODEL_FEATURES) == set(raw)
+    # Ensure no features are silently dropped
+    for f in raw:
+        assert f in MODEL_FEATURES, f"Training feature {f} missing from validation schema"

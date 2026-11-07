@@ -1,32 +1,35 @@
-"""data_contract.py — shared data / preprocessing contract (single source of truth).
-
-Every downstream script (04 training, 05 imbalance tuning, 06 evaluation,
-07 SHAP) must build model frames through this module so that the held-out
-test set, the EFA factor scores, the numeric/categorical typing and the
-rare-category grouping are IDENTICAL across all of them.
-
-Why this module exists
-----------------------
-``04_model_training.py`` performs, in this exact order:
-
-  1. select the leakage-free predictor contract from
-     ``data/processed/dataset_metadata.json``;
-  2. encode the target (turnover band) and drop unlabelled rows;
-  3. split 80/20, stratified, ``random_state=42``;
-  4. fit EFA on the TRAIN frame only and score both frames with that
-     artifact (``models/saved_models/factor_scoring.json``);
-  5. clean the raw frames: numeric coercion, sentinel-token handling,
-     categorical string coercion and *rare-category grouping* (categories
-     below 1% of the TRAIN frame are folded into ``OTHER_RARE``);
-  6. concatenate the cleaned raw predictors with the EFA factor scores.
-
-Step 5 is the subtle one: the rare-category map is derived from the TRAIN
-frame and then applied to BOTH train and test. A script that cleans the
-whole frame and then splits -- or that skips rare-category grouping --
-produces a test frame the saved pipelines were never fitted on, which
-silently changes every reported metric.  This module reproduces that
-contract exactly so evaluation numbers always match the training run.
 """
+data_contract.py — shared data and preprocessing contract.
+
+This module is the single source of truth for:
+
+* The canonical outer train-test partition.
+* Leakage-safe predictor selection.
+* Target-construction rules.
+* Fold-safe rare-category grouping.
+* Fold-safe exploratory factor analysis (EFA).
+* The complete preprocessing and inference pipeline.
+
+The canonical preprocessing sequence is:
+
+    Raw predictors
+    -> categorical cleaning
+    -> numeric coercion
+    -> fold-specific rare-category grouping
+    -> fold-specific EFA
+    -> imputation, scaling and encoding
+    -> classifier
+
+The outer 80/20 train-test partition is created before model development.
+Five-fold stratified cross-validation is applied only within the outer
+training partition. The held-out test partition is used only after model
+selection.
+
+Saved model artefacts contain the complete inference pipeline. Therefore,
+evaluation, SHAP analysis and dashboard inference must pass raw predictor
+data directly to the saved pipeline.
+"""
+
 from __future__ import annotations
 
 import json
@@ -35,11 +38,22 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn.compose import ColumnTransformer
+from sklearn.impute import SimpleImputer
 from sklearn.model_selection import train_test_split
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
 BASE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BASE / "ml_pipeline"))
+
 import efa_tools  # noqa: E402
+
+
+# ---------------------------------------------------------------------------
+# Paths and constants
+# ---------------------------------------------------------------------------
 
 DATA = BASE / "data" / "processed" / "wers_operational_risk_merged.csv"
 META_JSON = BASE / "data" / "processed" / "dataset_metadata.json"
@@ -47,249 +61,633 @@ MODEL_DIR = BASE / "models" / "saved_models"
 
 TARGET = "operational_risk_category"
 SCORE_COL = "operational_risk_score"
+
 ID_COLS = ["serno", "year", "weight"]
-LEAKAGE = ["employee_turnover_rate", "employee_turnover_rate_5yr",
-    "absenteeism_rate", "grievance_rate", "grievance_procedure_formal",
-    "training_problems", "skill_shortage_reported", "disputes_raised",
-    "dispute_risk_level", "other_industrial_action", "dismissal_rate",
-    "disciplinary_warnings", "suspensions", SCORE_COL]
+
+DIRECT_TARGET_LEAKAGE = [
+    "employee_turnover_rate",
+    "employee_turnover_rate_5yr",
+    SCORE_COL,
+]
+
+PRECAUTIONARY_EXCLUSIONS = [
+    "absenteeism_rate",
+    "grievance_rate",
+    "grievance_procedure_formal",
+    "training_problems",
+    "skill_shortage_reported",
+    "disputes_raised",
+    "dispute_risk_level",
+    "other_industrial_action",
+    "dismissal_rate",
+    "disciplinary_warnings",
+    "suspensions",
+]
+
+ADMINISTRATIVE_EXCLUSIONS = ID_COLS
+
+HIGH_CARDINALITY_EXCLUSIONS = [
+    "industry_code",
+    "industry_code_80",
+]
+
+LEAKAGE = (
+    DIRECT_TARGET_LEAKAGE
+    + PRECAUTIONARY_EXCLUSIONS
+    + ADMINISTRATIVE_EXCLUSIONS
+)
+
+TARGET_COLUMNS = {
+    TARGET,
+    "employee_turnover_rate",
+    "employee_turnover_rate_5yr",
+    SCORE_COL,
+}
+
 LABELS = ["Low", "Medium", "High"]
+
 RANDOM_STATE = 42
-MISS_TOKENS = ["", " ", "NA", "N/A", "nan", "None", "-9", "-8"]
-RARE_THRESHOLD = 0.01          # categories below this share -> OTHER_RARE
-MISSING_LEVEL = "MISSING"      # canonical level for a missing category
-RARE_LEVEL = "OTHER_RARE"      # canonical level for a rare category
-_CAT_MISSING_MAP = {"": MISSING_LEVEL, " ": MISSING_LEVEL,
-                    "nan": MISSING_LEVEL, "None": MISSING_LEVEL}
+TEST_SIZE = 0.20
+N_SPLITS = 5
+
+MISS_TOKENS = [
+    "",
+    " ",
+    "NA",
+    "N/A",
+    "nan",
+    "None",
+    "-9",
+    "-8",
+    "MISSING",
+]
+
+RARE_THRESHOLD = 0.01
+NUMERIC_RATIO_THRESHOLD = 0.85
+CARDINALITY_THRESHOLD = 12
+MISSING_LEVEL = "MISSING"
+RARE_LEVEL = "OTHER_RARE"
+
+TURNOVER_SENTINELS = [999, 9999.99, 99999, -9, -8]
 
 
-def clean_categorical(series):
-    """Canonicalise a categorical column to the train/serve contract.
-
-    Every missing category becomes the literal ``"MISSING"`` level:
-
-      * sentinel tokens (``MISS_TOKENS``) are treated as missing;
-      * whitespace-only strings are treated as missing;
-      * real nulls (``NaN`` / ``pd.NA`` / ``None``) are treated as missing;
-      * missing is then mapped to ``"MISSING"``.
-
-    The ORDER matters and is the whole point of this helper: the
-    missing -> ``"MISSING"`` substitution happens BEFORE any string
-    coercion, so a null can never survive as the literal string ``"nan"``
-    and can never be left as a null either.
-
-    Training, evaluation and serving all call this one function, which is
-    what makes the train/serve parity exact.  The result never contains a
-    null, so the downstream ``SimpleImputer``/``OneHotEncoder`` see the same
-    levels regardless of where the frame came from.
-    """
-    s = series.replace(list(MISS_TOKENS), np.nan)
-    s = s.astype("string").str.strip()
-    s = s.replace(_CAT_MISSING_MAP)
-    s = s.fillna(MISSING_LEVEL)
-    return s.astype(str)
-
-
+# ---------------------------------------------------------------------------
+# Dataset and predictor contract
+# ---------------------------------------------------------------------------
 
 def load_dataset():
-    """Return (df, predictor_columns) using the leakage-safe contract."""
+    """Load the processed dataset and return leakage-safe predictors."""
     df = pd.read_csv(DATA)
+
     if META_JSON.exists():
-        meta = json.loads(META_JSON.read_text())
-        feats = [c for c in meta.get("predictor_columns", []) if c in df.columns]
+        metadata = json.loads(META_JSON.read_text())
+
+        predictor_columns = [
+            column
+            for column in metadata.get("predictor_columns", [])
+            if column in df.columns
+        ]
     else:
-        feats = [c for c in df.columns if c not in ID_COLS + LEAKAGE + [TARGET]]
-    for _drop in ("industry_code", "industry_code_80"):
-        if _drop in feats:
-            feats.remove(_drop)
-    return df, feats
+        excluded = (
+            set(DIRECT_TARGET_LEAKAGE)
+            | set(PRECAUTIONARY_EXCLUSIONS)
+            | set(ADMINISTRATIVE_EXCLUSIONS)
+            | set(HIGH_CARDINALITY_EXCLUSIONS)
+            | set(TARGET_COLUMNS)
+        )
+
+        predictor_columns = [
+            column
+            for column in df.columns
+            if column not in excluded
+        ]
+
+    for column in HIGH_CARDINALITY_EXCLUSIONS:
+        if column in predictor_columns:
+            predictor_columns.remove(column)
+
+    return df, predictor_columns
 
 
-def clean_frames(Xtr_raw, Xte_raw):
-    """Reproduce 04's cleaning: typing, sentinels, rare-category grouping.
+def predictor_columns():
+    """Return the leakage-safe predictor columns."""
+    _, columns = load_dataset()
 
-    Returns (num_cols, cat_cols, rare_map). Mutates the frames in place,
-    exactly as the training script does.
+    prohibited = (
+        set(TARGET_COLUMNS)
+        | set(DIRECT_TARGET_LEAKAGE)
+        | set(PRECAUTIONARY_EXCLUSIONS)
+        | set(ADMINISTRATIVE_EXCLUSIONS)
+        | set(HIGH_CARDINALITY_EXCLUSIONS)
+    )
 
-    ``rare_map`` maps a categorical column to the list of TRAIN-derived
-    categories that were folded into ``OTHER_RARE``. It is persisted in
-    ``model_metadata.json`` so that inference can reproduce the identical
-    transformation (train/serve parity).
+    leaked_columns = set(columns) & prohibited
+
+    if leaked_columns:
+        raise ValueError(
+            f"Leakage-prone columns detected: {sorted(leaked_columns)}"
+        )
+
+    if len(columns) != len(set(columns)):
+        raise ValueError("Duplicate predictor columns detected.")
+
+    return columns
+
+
+# ---------------------------------------------------------------------------
+# Canonical outer train-test partition
+# ---------------------------------------------------------------------------
+
+def split_dataset(
+    df,
+    predictor_columns,
+    target_column=TARGET,
+):
     """
-    num_cols, cat_cols = [], []
-    rare_map = {}
-    for c in Xtr_raw.columns:
-        s = Xtr_raw[c].replace(list(MISS_TOKENS), np.nan)
-        coerced = pd.to_numeric(s, errors="coerce")
-        valid = s.notna().sum()
-        numeric_ratio = (coerced.notna().sum() / valid) if valid else 0
-        if numeric_ratio > 0.85 and coerced.nunique(dropna=True) > 12:
-            num_cols.append(c)
-            Xtr_raw[c] = coerced
-            Xte_raw[c] = pd.to_numeric(
-                Xte_raw[c].replace(list(MISS_TOKENS), np.nan), errors="coerce")
+    Create the canonical outer train-test partition.
+
+    The split is performed before rare-category grouping, EFA, imputation,
+    scaling or encoding. The held-out test partition therefore remains
+    untouched during cross-validation and model selection.
+
+    Returns:
+        Xtr_raw, Xte_raw, ytr, yte
+    """
+    if target_column not in df.columns:
+        raise ValueError(f"Target column not found: {target_column}")
+
+    missing_predictors = [
+        column
+        for column in predictor_columns
+        if column not in df.columns
+    ]
+
+    if missing_predictors:
+        raise ValueError(
+            f"Missing predictor columns: {missing_predictors}"
+        )
+
+    X = df[predictor_columns].copy()
+    y = df[target_column].astype(str).str.strip()
+
+    valid_labels = set(LABELS)
+    invalid_labels = set(y.dropna().unique()) - valid_labels
+
+    if invalid_labels:
+        raise ValueError(
+            f"Unexpected target labels detected: {sorted(invalid_labels)}"
+        )
+
+    target_map = {"Low": 0, "Medium": 1, "High": 2}
+    y = y.map(target_map)
+
+    valid_mask = y.notna()
+
+    X = X.loc[valid_mask].reset_index(drop=True)
+    y = y.loc[valid_mask].reset_index(drop=True).astype(int)
+
+    Xtr_raw, Xte_raw, ytr, yte = train_test_split(
+        X,
+        y,
+        test_size=TEST_SIZE,
+        stratify=y,
+        random_state=RANDOM_STATE,
+    )
+
+    return (
+        Xtr_raw.copy(),
+        Xte_raw.copy(),
+        ytr.copy(),
+        yte.copy(),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Canonical cleaning helpers
+# ---------------------------------------------------------------------------
+
+def clean_categorical(series):
+    """Canonicalise a categorical column for training and inference."""
+    series = series.replace(MISS_TOKENS, np.nan)
+    series = series.astype("string").str.strip()
+    series = series.replace(
+        {
+            "": MISSING_LEVEL,
+            " ": MISSING_LEVEL,
+            "nan": MISSING_LEVEL,
+            "None": MISSING_LEVEL,
+        }
+    )
+    series = series.fillna(MISSING_LEVEL)
+
+    return series.astype(str)
+
+
+def clean_turnover(series):
+    """Clean the turnover-rate measure used to construct the target."""
+    value = pd.to_numeric(series, errors="coerce")
+    value = value.mask(value.isin(TURNOVER_SENTINELS))
+    value = value.mask((value < 0) | (value > 100))
+
+    return value
+
+
+def turnover_to_category(value):
+    """Map a cleaned turnover rate to Low, Medium or High."""
+    if pd.isna(value):
+        return np.nan
+
+    if value <= 10.0:
+        return "Low"
+
+    if value <= 20.0:
+        return "Medium"
+
+    return "High"
+
+
+# ---------------------------------------------------------------------------
+# Fold-safe transformers
+# ---------------------------------------------------------------------------
+
+class CategoricalCleaningTransformer(BaseEstimator, TransformerMixin):
+    """
+    Apply canonical categorical cleaning without learning parameters.
+
+    This transformer cleans object and string columns only. Numeric columns
+    are left unchanged so that NumericCoercionTransformer can convert
+    placeholder values such as 'MISSING' to NaN before imputation.
+    """
+
+    def fit(self, X, y=None):
+        return self
+
+    def transform(self, X):
+        if not isinstance(X, pd.DataFrame):
+            X = pd.DataFrame(X)
+
+        X = X.copy()
+
+        for column in X.columns:
+            if (
+                pd.api.types.is_object_dtype(X[column])
+                or pd.api.types.is_string_dtype(X[column])
+            ):
+                X[column] = clean_categorical(X[column])
+
+        return X
+
+
+class DynamicColumnTransformer(BaseEstimator, TransformerMixin):
+    """
+    Dynamically detect numeric vs categorical columns and apply appropriate preprocessing.
+
+    This transformer fits after EFA and rare-category grouping, when the final
+    column schema is known. It separates numeric columns (imputation + scaling)
+    from categorical columns (imputation + one-hot encoding).
+    """
+
+    def __init__(self):
+        self.numeric_columns_ = None
+        self.categorical_columns_ = None
+        self.numeric_pipeline_ = None
+        self.categorical_pipeline_ = None
+
+    def fit(self, X, y=None):
+        """Detect column types and fit preprocessing pipelines."""
+        if not isinstance(X, pd.DataFrame):
+            X = pd.DataFrame(X)
+
+        self.numeric_columns_ = []
+        self.categorical_columns_ = []
+
+        for column in X.columns:
+            # Factor columns are always numeric
+            if column.startswith("factor_"):
+                self.numeric_columns_.append(column)
+            # Check if column is already numeric dtype
+            elif pd.api.types.is_numeric_dtype(X[column]):
+                self.numeric_columns_.append(column)
+            # Otherwise treat as categorical (after cleaning, these should be proper categories)
+            else:
+                self.categorical_columns_.append(column)
+
+        # Build numeric pipeline
+        if self.numeric_columns_:
+            self.numeric_pipeline_ = Pipeline([
+                ("imputer", SimpleImputer(strategy="median")),
+                ("scaler", StandardScaler()),
+            ])
+            self.numeric_pipeline_.fit(X[self.numeric_columns_])
+
+        # Build categorical pipeline
+        if self.categorical_columns_:
+            self.categorical_pipeline_ = Pipeline([
+                ("imputer", SimpleImputer(strategy="most_frequent")),
+                ("encoder", OneHotEncoder(handle_unknown="ignore", sparse_output=False)),
+            ])
+            self.categorical_pipeline_.fit(X[self.categorical_columns_])
+
+        return self
+
+    def transform(self, X):
+        """Apply preprocessing and concatenate results."""
+        if not isinstance(X, pd.DataFrame):
+            X = pd.DataFrame(X)
+
+        X = X.copy()
+
+        transformed_parts = []
+
+        if self.numeric_columns_ and self.numeric_pipeline_:
+            numeric_transformed = self.numeric_pipeline_.transform(X[self.numeric_columns_])
+            numeric_df = pd.DataFrame(
+                numeric_transformed,
+                columns=self.numeric_pipeline_.get_feature_names_out(),
+                index=X.index
+            )
+            transformed_parts.append(numeric_df)
+
+        if self.categorical_columns_ and self.categorical_pipeline_:
+            categorical_transformed = self.categorical_pipeline_.transform(X[self.categorical_columns_])
+            categorical_df = pd.DataFrame(
+                categorical_transformed,
+                columns=self.categorical_pipeline_.get_feature_names_out(),
+                index=X.index
+            )
+            transformed_parts.append(categorical_df)
+
+        if transformed_parts:
+            return pd.concat(transformed_parts, axis=1)
         else:
-            cat_cols.append(c)
-            # SAME canonical cleaning for train and test: every missing
-            # category becomes the literal "MISSING" level on both sides.
-            Xtr_raw[c] = clean_categorical(Xtr_raw[c])
-            Xte_raw[c] = clean_categorical(Xte_raw[c])
-            # rare-category grouping, derived on the TRAIN frame only.
-            # "MISSING" is the canonical missing level and must never be
-            # folded away, otherwise a missing value at serving time would
-            # be encoded as "OTHER_RARE" instead of "MISSING".
-            vc = Xtr_raw[c].value_counts(normalize=True)
-            rare = set(vc[vc < RARE_THRESHOLD].index) - {MISSING_LEVEL}
-            if rare:
-                rare_map[c] = sorted(rare)
-                Xtr_raw[c] = Xtr_raw[c].apply(
-                    lambda v: RARE_LEVEL if v in rare else v)
-                Xte_raw[c] = Xte_raw[c].apply(
-                    lambda v: RARE_LEVEL if v in rare else v)
-    return num_cols, cat_cols, rare_map
+            return X
+
+    def get_feature_names_out(self, input_features=None):
+        """Return feature names after transformation."""
+        feature_names = []
+        if self.numeric_columns_ and self.numeric_pipeline_:
+            feature_names.extend(self.numeric_pipeline_.get_feature_names_out())
+        if self.categorical_columns_ and self.categorical_pipeline_:
+            feature_names.extend(self.categorical_pipeline_.get_feature_names_out())
+        return feature_names
 
 
-# Backwards-compatible alias used by earlier call sites.
-_clean_raw_frames = clean_frames
-
-
-def split_dataset(df=None, feats=None):
-    """Return the canonical train/test split (before EFA / cleaning).
-
-    Splitting happens BEFORE the EFA fit and BEFORE cleaning, so the EFA
-    artifact and the rare-category map are derived from the training
-    partition only.  Every pipeline stage must use this function so that the
-    held-out rows are identical across training, evaluation and tuning.
-
-    Returns (Xtr_raw, Xte_raw, ytr, yte, feats).
+class NumericCoercionTransformer(BaseEstimator, TransformerMixin):
     """
-    if df is None or feats is None:
-        df, feats = load_dataset()
-    X_raw = df[[c for c in feats if c in df.columns]]
-    y = df[TARGET].astype(str).str.strip().map({"Low": 0, "Medium": 1, "High": 2})
-    mask = y.notna()
-    X_raw = X_raw.loc[mask].reset_index(drop=True)
-    y = y.loc[mask].astype(int).reset_index(drop=True)
-    Xtr_raw, Xte_raw, ytr, yte = train_test_split(
-        X_raw, y, test_size=0.2, stratify=y, random_state=RANDOM_STATE)
-    return Xtr_raw, Xte_raw, ytr, yte, list(Xtr_raw.columns)
+    Coerce numeric columns to numeric values dynamically.
 
-
-def build_full_frame():
-    """Return the cleaned frame for the WHOLE dataset (train + test rows).
-
-    The rows are cleaned with the *training-derived* rare-category map, so the
-    categorical levels are identical to the ones the saved model was fitted
-    on.  This is what explanation scripts (07 SHAP) and the inference wrapper
-    must use: a frame that skipped the rare-category grouping would expose
-    levels the one-hot encoder never saw, silently dropping their effect.
-
-    Returns (X_full, y_full, rare_map) where X_full contains the cleaned raw
-    predictors plus the EFA factor scores.
+    Detects numeric columns based on data type and content ratio.
+    The transformation is deterministic and learns no statistics from the data.
     """
-    fr = build_model_frames()
-    X_full = pd.concat([fr["Xtr"], fr["Xte"]], axis=0)
-    y_full = pd.concat([fr["ytr"], fr["yte"]], axis=0)
-    X_full = X_full.reset_index(drop=True)
-    y_full = y_full.reset_index(drop=True)
-    return X_full, y_full, fr["rare_map"]
+
+    def __init__(self):
+        pass
+
+    def fit(self, X, y=None):
+        return self
+
+    def transform(self, X):
+        if not isinstance(X, pd.DataFrame):
+            X = pd.DataFrame(X)
+
+        X = X.copy()
+
+        missing_tokens = {
+            token.strip().lower()
+            for token in MISS_TOKENS
+        }
+
+        for column in X.columns:
+            values = X[column].copy()
+
+            # Only process object/string columns
+            if not (
+                pd.api.types.is_object_dtype(values)
+                or pd.api.types.is_string_dtype(values)
+            ):
+                continue
+
+            # Skip columns that are clearly categorical (low cardinality)
+            unique_vals = values.dropna().unique()
+            if len(unique_vals) <= 15:  # Likely categorical
+                continue
+
+            # Skip if contains categorical markers
+            if any("MISSING" in str(v) or "OTHER_RARE" in str(v) for v in unique_vals):
+                continue
+
+            values = (
+                values.astype(str)
+                .str.strip()
+                .str.lower()
+            )
+
+            values = values.replace(missing_tokens, np.nan)
+
+            coerced = pd.to_numeric(values, errors="coerce")
+
+            # If >85% of values can be coerced to numeric, use the coerced version
+            valid_count = values.notna().sum()
+            if valid_count > 0:
+                numeric_ratio = coerced.notna().sum() / valid_count
+                if numeric_ratio > NUMERIC_RATIO_THRESHOLD:
+                    X[column] = coerced
+
+        return X
 
 
-def build_model_frames():
-    """Build the authoritative train/test frames for every pipeline stage.
-
-    Returns a dict with:
-      df          : source dataframe
-      feats       : raw predictor columns (leakage-free, no industry codes)
-      factor_names: EFA factor score column names
-      Xtr / Xte   : cleaned raw predictors (train / test)
-      ytr / yte   : encoded target (train / test)
-      Xtr_full / Xte_full : raw predictors + EFA factor scores
-      num_cols / cat_cols : column typing used by the ColumnTransformer
-      train_dist / test_dist : class counts for the report
-
-    The EFA artifact is the one persisted by the training run
-    (``models/saved_models/factor_scoring.json``); it was fitted on the
-    training partition only, so scoring the test frame with it leaks
-    nothing.
+class RareCategoryTransformer(BaseEstimator, TransformerMixin):
     """
-    df, feats = load_dataset()
-    X_raw = df[[c for c in feats if c in df.columns]]
-    y = df[TARGET].astype(str).str.strip().map({"Low": 0, "Medium": 1, "High": 2})
-    mask = y.notna()
-    X_raw = X_raw.loc[mask].reset_index(drop=True)
-    y = y.loc[mask].astype(int).reset_index(drop=True)
+    Fold-safe rare-category grouping transformer.
 
-    # split BEFORE EFA / cleaning (prevents leakage) -- identical to 04
-    Xtr_raw, Xte_raw, ytr, yte = train_test_split(
-        X_raw, y, test_size=0.2, stratify=y, random_state=RANDOM_STATE)
-
-    # EFA factor scores from the persisted training artifact
-    art_path = MODEL_DIR / "factor_scoring.json"
-    artifact = efa_tools.load(art_path) if art_path.exists() else None
-    if artifact is None:
-        artifact, _ = efa_tools.fit(Xtr_raw)
-        efa_tools.save(artifact, art_path)
-    factor_names = list(artifact["factor_names"])
-    f_tr = efa_tools.transform(Xtr_raw, artifact)
-    f_te = efa_tools.transform(Xte_raw, artifact)
-
-    # cleaning (typing + rare-category grouping) -- identical to 04
-    num_cols, cat_cols, rare_map = clean_frames(Xtr_raw, Xte_raw)
-    num_cols = num_cols + [c for c in factor_names if c not in num_cols]
-
-    full_feats = list(Xtr_raw.columns) + factor_names
-    Xtr_full = pd.concat([Xtr_raw, f_tr], axis=1)[full_feats]
-    Xte_full = pd.concat([Xte_raw, f_te], axis=1)[full_feats]
-
-    return {
-        "df": df,
-        "feats": list(Xtr_raw.columns),
-        "factor_names": factor_names,
-        "features": full_feats,
-        "Xtr_raw": Xtr_raw, "Xte_raw": Xte_raw,
-        "Xtr": Xtr_full, "Xte": Xte_full,
-        "ytr": ytr, "yte": yte,
-        "num_cols": num_cols, "cat_cols": cat_cols,
-        "rare_map": rare_map,
-        "train_dist": ytr.value_counts().to_dict(),
-        "test_dist": yte.value_counts().to_dict(),
-    }
-
-
-def apply_serve_transform(df, numeric_features, categorical_features,
-                          rare_map=None):
-    """Reproduce the training-time cleaning for an arbitrary (serve) frame.
-
-    This is the single implementation of the "raw frame -> model frame"
-    transformation used at inference time, so a payload is always preprocessed
-    exactly like the training rows were:
-
-      * numeric columns -> ``pd.to_numeric`` with the sentinel tokens dropped;
-      * categorical columns -> string coercion, strip, missing-token folding;
-      * TRAIN-derived rare categories -> ``OTHER_RARE`` (from ``rare_map``).
-
-    ``rare_map`` must come from the training run (``model_metadata.json``).
-    When it is ``None`` no rare-category folding is applied, which reproduces
-    the pre-contract behaviour of the inference wrapper.
+    The rare-category map is fitted using only the training observations
+    supplied to fit(). During cross-validation, a separate map is fitted for
+    each CV training fold.
     """
-    out = df.copy()
-    rare_map = rare_map or {}
-    for c in numeric_features:
-        if c in out.columns:
-            out[c] = pd.to_numeric(
-                out[c].replace(list(MISS_TOKENS), np.nan), errors="coerce")
-    for c in categorical_features:
-        if c in out.columns:
-            # SAME canonical cleaning as training/evaluation, so a missing
-            # category is encoded as "MISSING" at serving time too.
-            out[c] = clean_categorical(out[c])
-            # "MISSING" is the canonical missing level and is never folded
-            # into OTHER_RARE, so a missing value keeps its own encoding.
-            rare = set(rare_map.get(c, [])) - {MISSING_LEVEL}
-            if rare:
-                out[c] = out[c].apply(
-                    lambda v: RARE_LEVEL if v in rare else v)
-    return out
+
+    def __init__(
+        self,
+        threshold=RARE_THRESHOLD,
+        random_state=RANDOM_STATE,
+    ):
+        self.threshold = threshold
+        self.random_state = random_state
+        self.rare_category_map_ = None
+
+    def fit(self, X, y=None):
+        if not isinstance(X, pd.DataFrame):
+            X = pd.DataFrame(X)
+
+        self.rare_category_map_ = {}
+
+        for column in X.columns:
+            cleaned = clean_categorical(X[column])
+            frequencies = cleaned.value_counts(normalize=True)
+
+            rare_values = frequencies[
+                frequencies < self.threshold
+            ].index.tolist()
+
+            rare_values = [
+                value
+                for value in rare_values
+                if value != MISSING_LEVEL
+            ]
+
+            if rare_values:
+                self.rare_category_map_[column] = sorted(rare_values)
+
+        return self
+
+    def transform(self, X):
+        if self.rare_category_map_ is None:
+            raise RuntimeError(
+                "RareCategoryTransformer must be fitted before transform()."
+            )
+
+        if not isinstance(X, pd.DataFrame):
+            X = pd.DataFrame(X)
+
+        X = X.copy()
+
+        for column, rare_values in self.rare_category_map_.items():
+            if column in X.columns:
+                X[column] = clean_categorical(X[column])
+                X[column] = X[column].apply(
+                    lambda value: (
+                        RARE_LEVEL
+                        if value in rare_values
+                        else value
+                    )
+                )
+
+        return X
 
 
+class EFATransformer(BaseEstimator, TransformerMixin):
+    """
+    Fold-safe EFA transformer.
+
+    EFA is fitted using only the training observations supplied to fit().
+    During cross-validation, a separate EFA model is fitted for each CV
+    training fold.
+    """
+
+    def __init__(self, random_state=RANDOM_STATE):
+        self.random_state = random_state
+        self.artifact_ = None
+        self.factor_names_ = None
+
+    def fit(self, X, y=None):
+        if not isinstance(X, pd.DataFrame):
+            X = pd.DataFrame(X)
+
+        X = X.drop(columns=[TARGET], errors="ignore")
+
+        self.artifact_, _ = efa_tools.fit(X)
+        self.factor_names_ = list(self.artifact_["factor_names"])
+
+        return self
+
+    def transform(self, X):
+        if self.artifact_ is None:
+            raise RuntimeError(
+                "EFATransformer must be fitted before transform()."
+            )
+
+        if not isinstance(X, pd.DataFrame):
+            X = pd.DataFrame(X)
+
+        X = X.copy()
+        factors = efa_tools.transform(X, self.artifact_)
+
+        for column in factors.columns:
+            X[column] = factors[column].to_numpy()
+
+        return X
+
+
+# ---------------------------------------------------------------------------
+# Fold-safe pipeline builder
+# ---------------------------------------------------------------------------
+
+def build_cv_pipeline(
+    model,
+):
+    """
+    Build the complete fold-safe preprocessing and classification pipeline.
+
+    The pipeline applies the following sequence:
+
+        1. Canonical categorical cleaning
+        2. Numeric coercion (dynamic detection)
+        3. Fold-specific rare-category grouping
+        4. Fold-specific EFA
+        5. Dynamic column detection and preprocessing
+        6. Classifier
+
+    The pipeline must receive raw predictor data. It must not receive data
+    that has already been rare-grouped, factor-scored, imputed, scaled or
+    encoded.
+    """
+    return Pipeline(
+        steps=[
+            (
+                "categorical_cleaning",
+                CategoricalCleaningTransformer(),
+            ),
+            (
+                "numeric_coercion",
+                NumericCoercionTransformer(),
+            ),
+            (
+                "rare_category",
+                RareCategoryTransformer(
+                    threshold=RARE_THRESHOLD,
+                    random_state=RANDOM_STATE,
+                ),
+            ),
+            (
+                "efa",
+                EFATransformer(
+                    random_state=RANDOM_STATE,
+                ),
+            ),
+            (
+                "preprocessing",
+                DynamicColumnTransformer(),
+            ),
+            (
+                "classifier",
+                model,
+            ),
+        ]
+    )
+
+
+# ---------------------------------------------------------------------------
+# Inference helper
+# ---------------------------------------------------------------------------
+
+def payload_to_frame(
+    payload,
+    predictor_columns,
+):
+    """
+    Convert an API payload to a one-row raw DataFrame.
+
+    The returned frame must be passed directly to a saved full pipeline.
+    The pipeline applies the same transformations used during training.
+    """
+    frame = pd.DataFrame([payload])
+
+    missing_columns = [
+        column
+        for column in predictor_columns
+        if column not in frame.columns
+    ]
+
+    for column in missing_columns:
+        frame[column] = np.nan
+
+    return frame[predictor_columns]
