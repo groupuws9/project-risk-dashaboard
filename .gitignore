@@ -21,6 +21,14 @@ scripts/*_err.txt
 
 # Pipeline run logs / throwaway probes (transient, never committed)
 run_logs/
+*.log
+_probe*.py
+_run*.log
+output.txt
+
+# Test / notebook caches
+.pytest_cache/
+.ipynb_checkpoints/
 
 # OS / IDE / tooling
 .DS_Store

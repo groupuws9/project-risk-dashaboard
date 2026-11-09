@@ -106,6 +106,11 @@ mc = pd.read_csv(RES / "tables" / "model_comparison.csv")
 ev = pd.read_csv(RES / "tables" / "evaluation_summary.csv")
 NICE = {"logreg": "Logistic\nRegression", "random_forest": "Random\nForest",
         "xgboost": "XGBoost", "lightgbm": "LightGBM", "mlp": "MLP"}
+# Filter to models with available confusion matrices
+import os as _os
+_available = {m for m in NICE if _os.path.exists(RES / "tables" / f"confusion_matrix_{m}.csv")}
+NICE = {m: nice for m, nice in NICE.items() if m in _available}
+print(f"  Models with confusion matrices: {list(NICE.keys())}")
 
 # Figure 5.1 – model comparison: accuracy vs balanced accuracy
 core = mc[mc["model"].isin(NICE)].copy()
@@ -305,7 +310,8 @@ for i, m in enumerate(NICE, start=3):
         row.to_csv(TAB / f"table_5_{i}_{m}_metrics.csv", index=False)
 
 # Tables 5.8-5.9 – confusion matrices
-for i, m in enumerate(["logreg", "random_forest"], start=8):
+for i, m in enumerate([m for m in ["logreg", "random_forest"] 
+                       if _os.path.exists(RES / "tables" / f"confusion_matrix_{m}.csv")], start=8):
     pd.read_csv(RES / "tables" / f"confusion_matrix_{m}.csv").to_csv(
         TAB / f"table_5_{i}_confusion_matrix_{m}.csv", index=False)
 

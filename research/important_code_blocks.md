@@ -29,18 +29,29 @@ def turnover_to_category(v):
 ## Code Block 3.2: Leakage-Safe Feature Selection
 
 ```python
-# Target-constructing columns can NEVER be candidate features (data leakage)
-LEAKAGE = [
-    "employee_turnover_rate", "employee_turnover_rate_5yr", "absenteeism_rate",
-    "grievance_rate", "grievance_procedure_formal", "training_problems",
-    "skill_shortage_reported", "disputes_raised", "dispute_risk_level",
-    "other_industrial_action", "dismissal_rate", "disciplinary_warnings",
-    "suspensions", SCORE_COL,
+# ml_pipeline/data_contract.py
+# Target-constructing and risk-indicator columns can NEVER be candidate
+# features (data leakage). Leakage = 14 = 3 directly target-derived + 11
+# precautionary risk indicators; the 3 administrative IDs are excluded
+# separately and are deliberately NOT counted as leakage.
+ID_COLS = ["serno", "year", "weight"]
+
+DIRECT_TARGET_LEAKAGE = [
+    "employee_turnover_rate", "employee_turnover_rate_5yr", SCORE_COL,
 ]
+PRECAUTIONARY_EXCLUSIONS = [
+    "absenteeism_rate", "grievance_rate", "grievance_procedure_formal",
+    "training_problems", "skill_shortage_reported", "disputes_raised",
+    "dispute_risk_level", "other_industrial_action", "dismissal_rate",
+    "disciplinary_warnings", "suspensions",
+]
+HIGH_CARDINALITY_EXCLUSIONS = ["industry_code", "industry_code_80"]
+
+LEAKAGE = DIRECT_TARGET_LEAKAGE + PRECAUTIONARY_EXCLUSIONS  # 14 columns
 
 def predictor_columns():
     """Mapped columns usable as predictors (not IDs, not leakage/target)."""
-    return [c for c in ALL_VARIABLES if c not in LEAKAGE and c not in ID_VARS]
+    return [c for c in ALL_VARIABLES if c not in LEAKAGE and c not in ID_COLS]
 ```
 
 ## Code Block 3.3: Stratified Train-Test Split (shared contract)

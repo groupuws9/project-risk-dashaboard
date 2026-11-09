@@ -189,6 +189,28 @@ def transform(df, artifact):
                         columns=list(artifact["factor_names"]))
 
 
+def ensure(df, artifact_path):
+    """Load the saved scoring artifact (or fit one) and append factor scores.
+
+    Returns ``(df_with_factor_columns, artifact)``. The saved artifact is
+    reused when present so this stays deterministic with the deployed model;
+    otherwise EFA is fitted on ``df`` and persisted. The input frame is not
+    mutated.
+    """
+    artifact_path = Path(artifact_path)
+    if artifact_path.exists():
+        artifact = load(artifact_path)
+    else:
+        artifact, _ = fit(df)
+        save(artifact, artifact_path)
+
+    factors = transform(df, artifact)
+    out = df.copy()
+    for column in factors.columns:
+        out[column] = factors[column].to_numpy()
+    return out, artifact
+
+
 def save(artifact, path):
     """Write the scoring artifact as JSON (numpy-safe)."""
     path = Path(path)

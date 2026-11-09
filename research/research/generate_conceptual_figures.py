@@ -147,13 +147,13 @@ def fig_3_2_artefact_architecture():
     print("Saved: fig_3_2_artefact_architecture.png")
 
 
-def fig_4_1_training_pipeline():
-    """Figure 4.1: Implemented training pipeline."""
+def fig_4_5_training_pipeline():
+    """Figure 4.5: Implemented training pipeline."""
     fig, ax = plt.subplots(figsize=(14, 8))
     ax.set_xlim(0, 14)
     ax.set_ylim(0, 8)
     ax.axis("off")
-    ax.set_title("Figure 4.1: Implemented Training Pipeline", 
+    ax.set_title("Figure 4.5: Implemented Training Pipeline", 
                  fontsize=16, fontweight="bold", pad=20)
     
     # Input
@@ -201,18 +201,18 @@ def fig_4_1_training_pipeline():
     draw_arrow(ax, 9.5, 2.9, 10, 2.1)
     
     plt.tight_layout()
-    plt.savefig(FIG_DIR / "fig_4_1_training_pipeline.png", dpi=300, bbox_inches="tight")
+    plt.savefig(FIG_DIR / "fig_4_5_training_pipeline.png", dpi=300, bbox_inches="tight")
     plt.close()
-    print("Saved: fig_4_1_training_pipeline.png")
+    print("Saved: fig_4_5_training_pipeline.png")
 
 
-def fig_4_3_api_integration():
-    """Figure 4.3: Flask API integration."""
+def fig_4_6_api_integration():
+    """Figure 4.6: Flask API integration."""
     fig, ax = plt.subplots(figsize=(12, 9))
     ax.set_xlim(0, 12)
     ax.set_ylim(0, 9)
     ax.axis("off")
-    ax.set_title("Figure 4.3: Flask API Integration", 
+    ax.set_title("Figure 4.6: Flask API Integration", 
                  fontsize=16, fontweight="bold", pad=20)
     
     # Client
@@ -251,9 +251,9 @@ def fig_4_3_api_integration():
     draw_arrow(ax, 7, 5.9, 10.5, 4.7)
     
     plt.tight_layout()
-    plt.savefig(FIG_DIR / "fig_4_3_api_integration.png", dpi=300, bbox_inches="tight")
+    plt.savefig(FIG_DIR / "fig_4_6_api_integration.png", dpi=300, bbox_inches="tight")
     plt.close()
-    print("Saved: fig_4_3_api_integration.png")
+    print("Saved: fig_4_6_api_integration.png")
 
 
 def fig_2_1_research_problem():
@@ -309,6 +309,6 @@ if __name__ == "__main__":
     fig_2_1_research_problem()
     fig_3_1_research_workflow()
     fig_3_2_artefact_architecture()
-    fig_4_1_training_pipeline()
-    fig_4_3_api_integration()
+    fig_4_5_training_pipeline()
+    fig_4_6_api_integration()
     print("\nAll diagrams generated successfully!")

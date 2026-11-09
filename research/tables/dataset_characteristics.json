@@ -2,7 +2,7 @@
   "n_observations": 14448,
   "n_variables": 53,
   "n_target_valid": 6385,
-  "n_predictive_features": 37,
+  "n_predictive_features": 33,
   "target": "operational_risk_category",
   "class_counts": {
     "Low": 5077,

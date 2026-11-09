@@ -23,6 +23,7 @@ Then open:
 from pathlib import Path
 import json
 import logging
+import math
 import os
 import sys
 import time
@@ -37,6 +38,7 @@ sys.path.insert(0, str(BASE / "models"))
 sys.path.insert(0, str(BASE))
 
 from flask import Flask, jsonify, render_template, request, Response
+from flask.json.provider import DefaultJSONProvider
 from flask_cors import CORS
 from pydantic import ValidationError
 
@@ -49,7 +51,32 @@ from dashboard.validation import (
 )
 
 
+def json_safe(value):
+    """Recursively map non-finite floats to ``None``.
+
+    Python's ``json`` emits bare ``NaN`` / ``Infinity`` tokens, which are not
+    valid strict JSON and are rejected by browsers — this previously broke
+    ``/api/metadata`` and surfaced as "Unable to load insights".  Replacing
+    such values with ``null`` keeps every response valid (system test ST19).
+    """
+    if isinstance(value, dict):
+        return {key: json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [json_safe(item) for item in value]
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    return value
+
+
+class StrictJSONProvider(DefaultJSONProvider):
+    """JSON provider that never writes invalid (NaN/Infinity) tokens."""
+
+    def dumps(self, obj, **kwargs):
+        return super().dumps(json_safe(obj), **kwargs)
+
+
 app = Flask(__name__)
+app.json = StrictJSONProvider(app)
 CORS(app)
 
 MODEL_DIR = BASE / "models" / "saved_models"
@@ -70,7 +97,10 @@ LOG = logging.getLogger("dashboard")
 RATE_LIMIT = int(os.environ.get("DASH_RATE_LIMIT", "120"))
 RATE_WINDOW = 60
 
-request_timestamps = defaultdict(deque)
+# Per-IP rolling window of request timestamps. Exposed as ``_hits`` so the
+# rate-limit behaviour can be exercised by the test-suite.
+_hits = defaultdict(deque)
+request_timestamps = _hits
 
 
 def is_rate_limited():
@@ -78,7 +108,7 @@ def is_rate_limited():
     now = time.time()
     client_key = request.remote_addr or "unknown"
 
-    timestamps = request_timestamps[client_key]
+    timestamps = _hits[client_key]
 
     while timestamps and timestamps[0] < now - RATE_WINDOW:
         timestamps.popleft()
@@ -181,16 +211,34 @@ predictor = None
 metadata = {}
 dataset = None
 
-try:
-    predictor = OperationalRiskPredictor.load()
-    metadata = json.loads(
-        (MODEL_DIR / "model_metadata.json").read_text()
-    )
-except Exception as error:
+# Metadata (feature contract, labels and best-model name) is loaded first and
+# independently of the saved pipeline. The index page, /api/metadata and
+# /api/insights depend only on metadata, so the dashboard still renders model
+# insights even when no .pkl artefact has been generated yet.
+METADATA_PATH = MODEL_DIR / "model_metadata.json"
+
+if METADATA_PATH.exists():
+    try:
+        metadata = json.loads(METADATA_PATH.read_text())
+    except Exception as error:
+        print(f"WARNING: model metadata could not be parsed ({error}).")
+else:
     print(
-        f"WARNING: model not loaded yet ({error}). "
+        f"WARNING: model metadata not found ({METADATA_PATH}). "
         "Run 04_model_training.py first."
     )
+
+# The predictor needs both the metadata contract and the saved pipeline, so a
+# missing artefact disables live prediction only — never the insights views.
+if metadata:
+    try:
+        predictor = OperationalRiskPredictor.load()
+        LOG.info("Loaded best model: %s", metadata.get("best_model"))
+    except Exception as error:
+        print(
+            f"WARNING: model not loaded yet ({error}). "
+            "Run 04_model_training.py first."
+        )
 
 try:
     dataset = pd.read_csv(DATA_PATH)
@@ -688,6 +736,7 @@ def api_features():
         "best_model": metadata.get("best_model"),
         "shap": None,
         "local_explanation": None,
+        "feature_importance": [],
     }
 
     feature_importance_path = TAB_DIR / "feature_importance.csv"
@@ -756,11 +805,20 @@ def api_insights():
         else None
     )
 
-    response["metrics"] = (
-        metadata.get("all_test_balanced_accuracy", {})
-        if metadata
-        else {}
-    )
+    response["metrics"] = {
+        # Held-out balanced accuracy, or null where a model has no saved
+        # artefact. NaN is not valid strict JSON (system test ST19).
+        model: (
+            float(score)
+            if isinstance(score, (int, float)) and math.isfinite(score)
+            else None
+        )
+        for model, score in (
+            metadata.get("all_test_balanced_accuracy", {})
+            if metadata
+            else {}
+        ).items()
+    }
 
     return jsonify(response)
 

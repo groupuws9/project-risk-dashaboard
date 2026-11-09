@@ -1,4 +1,4 @@
-"""Generate Figure 5.5: Runtime-validation test results visualization."""
+"""Generate Figure 5.8: Runtime-validation test results visualization."""
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib
@@ -62,7 +62,7 @@ for i, (cat, count) in enumerate(zip(cat_counts.index, cat_counts.values)):
     ax2.text(count + 0.1, i, str(count), va="center", fontsize=9)
 
 plt.tight_layout()
-output_path = FIG_DIR / "fig_5_5_runtime_validation.png"
+output_path = FIG_DIR / "fig_5_8_runtime_validation.png"
 plt.savefig(output_path, dpi=130, bbox_inches="tight")
 plt.close()
 print(f"Saved: {output_path}")

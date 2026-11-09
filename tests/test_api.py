@@ -181,6 +181,53 @@ def test_data_endpoints(client):
     assert "attachment" in r.headers["Content-Disposition"]
 
 
+def test_data_summary_mean_exposure_scenario(client):
+    """The explorer's mean-exposure scenario is served by the real
+    ``turnover_rate_mean`` / ``turnover_rate_by_sector`` fields (the JS used to
+    read a stale ``mean_score`` key, so the mean always rendered as 0.00)."""
+    r = client.get("/api/data/summary?sector=1&size=1")
+    assert r.status_code == 200
+    j = r.get_json()
+
+    assert "turnover_rate_mean" in j
+    assert j["turnover_rate_mean"] is None or isinstance(
+        j["turnover_rate_mean"], float
+    )
+    assert isinstance(j.get("risk_distribution", {}), dict)
+    assert isinstance(j.get("turnover_rate_by_sector", {}), dict)
+
+
+def test_insights_report_best_model(client):
+    """Insights must surface the selected model independently of live
+    prediction, so the dashboard shows model information on load."""
+    r = client.get("/api/insights")
+    assert r.status_code == 200
+    j = r.get_json()
+    assert j.get("best_model"), "best_model missing from /api/insights"
+    assert isinstance(j.get("metrics", {}), dict)
+    assert "model_comparison.csv" in j
+    # ST19 contract: the payload must be valid strict JSON (no NaN/Infinity).
+    json.dumps(j, allow_nan=False)
+
+
+def test_metadata_is_strict_json(client):
+    """``/api/metadata`` must never emit bare NaN/Infinity tokens.
+
+    ``model_metadata.json`` stores NaN for models without a held-out score; the
+    strict-JSON provider maps those to null so the browser's ``res.json()``
+    succeeds (this was the "Unable to load insights" failure)."""
+    r = client.get("/api/metadata")
+    assert r.status_code == 200
+    raw = r.get_data(as_text=True)
+    assert "NaN" not in raw and "Infinity" not in raw
+    # Reject any non-finite constant explicitly rather than trusting Python's
+    # permissive default parser.
+    json.loads(
+        raw,
+        parse_constant=lambda c: (_ for _ in ()).throw(ValueError(c)),
+    )
+
+
 def test_index_renders(client):
     r = client.get("/")
     assert r.status_code == 200

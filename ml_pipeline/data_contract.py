@@ -58,6 +58,8 @@ import efa_tools  # noqa: E402
 DATA = BASE / "data" / "processed" / "wers_operational_risk_merged.csv"
 META_JSON = BASE / "data" / "processed" / "dataset_metadata.json"
 MODEL_DIR = BASE / "models" / "saved_models"
+FACTOR_ARTIFACT = MODEL_DIR / "factor_scoring.json"
+MODEL_METADATA = MODEL_DIR / "model_metadata.json"
 
 TARGET = "operational_risk_category"
 SCORE_COL = "operational_risk_score"
@@ -91,10 +93,13 @@ HIGH_CARDINALITY_EXCLUSIONS = [
     "industry_code_80",
 ]
 
+# Leakage-family exclusions only (14 = 3 directly target-derived + 11
+# precautionary risk indicators). The three administrative identifiers
+# (serno / year / weight) are excluded separately and are deliberately NOT
+# counted as leakage, matching the dataset contract in 01_build_dataset.py.
 LEAKAGE = (
     DIRECT_TARGET_LEAKAGE
     + PRECAUTIONARY_EXCLUSIONS
-    + ADMINISTRATIVE_EXCLUSIONS
 )
 
 TARGET_COLUMNS = {
@@ -304,6 +309,193 @@ def turnover_to_category(value):
         return "Medium"
 
     return "High"
+
+
+def classify_columns(frame):
+    """Split a raw predictor frame into numeric and categorical columns.
+
+    A column is numeric when almost all of its non-sentinel values parse as
+    numbers (``NUMERIC_RATIO_THRESHOLD``) AND it carries more than
+    ``CARDINALITY_THRESHOLD`` distinct values. Everything else is categorical.
+    This is the single classification rule used by 04, 05 and the inference
+    wrapper, so the persisted metadata always matches the live contract.
+    """
+    numeric_columns = []
+    categorical_columns = []
+
+    for column in frame.columns:
+        series = frame[column].replace(MISS_TOKENS, np.nan)
+        coerced = pd.to_numeric(series, errors="coerce")
+
+        valid_count = series.notna().sum()
+        numeric_ratio = (
+            coerced.notna().sum() / valid_count
+            if valid_count > 0
+            else 0.0
+        )
+
+        if (
+            numeric_ratio > NUMERIC_RATIO_THRESHOLD
+            and coerced.nunique(dropna=True) > CARDINALITY_THRESHOLD
+        ):
+            numeric_columns.append(column)
+        else:
+            categorical_columns.append(column)
+
+    return numeric_columns, categorical_columns
+
+
+def clean_frames(train, test):
+    """Canonically clean the train and test partitions in place.
+
+    The categorical levels are canonicalised on BOTH partitions (so a missing
+    value is ``MISSING`` everywhere) and the rare-category map is derived from
+    the TRAIN partition only, then applied to both partitions. The canonical
+    missing level is never folded into ``OTHER_RARE``.
+
+    Returns ``(train, categorical_columns, rare_map)``; ``train`` and ``test``
+    are mutated in place.
+    """
+    numeric_columns, categorical_columns = classify_columns(train)
+
+    for column in categorical_columns:
+        train[column] = clean_categorical(train[column])
+        test[column] = clean_categorical(test[column])
+
+    for column in numeric_columns:
+        train[column] = pd.to_numeric(
+            train[column].replace(MISS_TOKENS, np.nan), errors="coerce"
+        )
+        test[column] = pd.to_numeric(
+            test[column].replace(MISS_TOKENS, np.nan), errors="coerce"
+        )
+
+    rare_map = {}
+
+    for column in categorical_columns:
+        frequencies = train[column].value_counts(normalize=True)
+
+        rare_values = sorted(
+            value
+            for value in frequencies[frequencies < RARE_THRESHOLD].index
+            if value != MISSING_LEVEL
+        )
+
+        if rare_values:
+            rare_map[column] = rare_values
+            train[column] = train[column].apply(
+                lambda value: RARE_LEVEL if value in rare_values else value
+            )
+            test[column] = test[column].apply(
+                lambda value: RARE_LEVEL if value in rare_values else value
+            )
+
+    return train, categorical_columns, rare_map
+
+
+def apply_serve_transform(frame, numeric_columns, categorical_columns, rare_map):
+    """Apply the canonical cleaning to a raw serving frame.
+
+    This reproduces the train/test cleaning of :func:`clean_frames` for a
+    single frame: categorical levels are canonicalised, persisted rare levels
+    are folded to ``OTHER_RARE`` (never ``MISSING``) and numeric columns are
+    coerced. The EFA factor scores are NOT added here; the caller derives them
+    from the saved scoring artifact.
+    """
+    frame = frame.copy()
+    numeric_columns = list(numeric_columns or [])
+    categorical_columns = list(categorical_columns or [])
+    rare_map = dict(rare_map or {})
+
+    for column in categorical_columns:
+        if column in frame.columns:
+            frame[column] = clean_categorical(frame[column])
+
+    for column, rare_values in rare_map.items():
+        if column in frame.columns:
+            frame[column] = clean_categorical(frame[column])
+            rare_values = [v for v in rare_values if v != MISSING_LEVEL]
+            frame[column] = frame[column].apply(
+                lambda value: RARE_LEVEL if value in rare_values else value
+            )
+
+    for column in numeric_columns:
+        if column in frame.columns:
+            frame[column] = pd.to_numeric(
+                frame[column].replace(MISS_TOKENS, np.nan), errors="coerce"
+            )
+
+    return frame
+
+
+def load_factor_artifact(artifact_path=None):
+    """Load the persisted EFA scoring artifact (fit + persist if absent)."""
+    artifact_path = Path(artifact_path or FACTOR_ARTIFACT)
+
+    if not artifact_path.exists():
+        df, _ = load_dataset()
+        artifact, _ = efa_tools.fit(df)
+        efa_tools.save(artifact, artifact_path)
+
+    return efa_tools.load(artifact_path)
+
+
+def derive_factor_scores(frame, artifact_path=None):
+    """Return the ``factor_1..factor_k`` scores for a raw predictor frame."""
+    artifact = load_factor_artifact(artifact_path)
+    return efa_tools.transform(frame, artifact)
+
+
+def build_model_frames(artifact_path=None):
+    """Rebuild the canonical training / held-out contract frames.
+
+    Returns a dictionary with the cleaned + rare-grouped + factor-scored
+    frames (``Xtr`` / ``Xte``), the untouched raw partitions
+    (``Xtr_raw`` / ``Xte_raw``), the integer-encoded targets, the feature
+    contract and the train-derived rare-category map. Every script and the
+    inference wrapper build their frames through this function so the split,
+    the cleaning and the rare map can never drift apart.
+    """
+    df, predictor_columns = load_dataset()
+
+    Xtr_raw, Xte_raw, ytr, yte = split_dataset(
+        df, predictor_columns, target_column=TARGET
+    )
+
+    Xtr_raw = Xtr_raw.copy()
+    Xte_raw = Xte_raw.copy()
+
+    Xtr = Xtr_raw.copy()
+    Xte = Xte_raw.copy()
+
+    _, cat_cols, rare_map = clean_frames(Xtr, Xte)
+
+    num_cols = [column for column in Xtr.columns if column not in cat_cols]
+
+    factor_names = list(load_factor_artifact(artifact_path)["factor_names"])
+
+    if factor_names:
+        train_factors = derive_factor_scores(Xtr, artifact_path)
+        test_factors = derive_factor_scores(Xte, artifact_path)
+
+        for name in factor_names:
+            Xtr[name] = train_factors[name].to_numpy()
+            Xte[name] = test_factors[name].to_numpy()
+
+        num_cols = num_cols + factor_names
+
+    return {
+        "Xtr": Xtr,
+        "Xte": Xte,
+        "ytr": ytr,
+        "yte": yte,
+        "Xtr_raw": Xtr_raw,
+        "Xte_raw": Xte_raw,
+        "features": list(predictor_columns),
+        "num_cols": num_cols,
+        "cat_cols": cat_cols,
+        "rare_map": rare_map,
+    }
 
 
 # ---------------------------------------------------------------------------

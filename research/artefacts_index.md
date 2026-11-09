@@ -1,6 +1,6 @@
 # Artefacts Index - Logical Ordering
 
-## Tables (28 total)
+## Tables (28 CSV + 1 JSON)
 
 ### Chapter 2
 - Table 2.1: Candidate model comparison → `table_5_1_model_comparison.csv`
@@ -48,7 +48,7 @@
 
 ---
 
-## Figures (11 total)
+## Figures (17 total)
 
 ### Chapter 2
 - Figure 2.1: Relationship between research problem, requirements and artefact → `fig_2_1_research_problem.png`
@@ -86,13 +86,13 @@
 
 ## Summary
 
-**Tables:** 28 total
-- 24 available as CSV files
+**Tables:** 28 CSV tables + 1 JSON (`dataset_characteristics.json`)
+- 28 available as CSV files
 - 4 conceptual (manual creation needed)
 
-**Figures:** 11 main figures + 2 supplementary screenshots
-- 11 main figures available as PNG files
+**Figures:** 17 main figures + 2 supplementary screenshots
+- 17 main figures available as PNG files
 - 2 dashboard screenshots available
-- 6 conceptual diagrams available as Mermaid source
+- Conceptual diagrams available as Mermaid source (`conceptual_diagrams.md`)
 
 All naming conflicts have been resolved. Each table and figure now has a unique identifier following the chapter-section numbering convention.

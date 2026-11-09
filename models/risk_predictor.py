@@ -47,10 +47,33 @@ class OperationalRiskPredictor:
         pipeline,
         predictor_columns,
         labels=None,
+        metadata=None,
     ):
         self.pipeline = pipeline
         self.predictor_columns = list(predictor_columns)
         self.labels = list(labels or dc.LABELS)
+
+        metadata = dict(metadata or {})
+        self.metadata = metadata
+
+        self.numeric_features = list(metadata.get("numeric_features", []))
+        self.categorical_features = list(
+            metadata.get("categorical_features", [])
+        )
+        self.rare_map = dict(metadata.get("rare_category_map", {}) or {})
+        self.factor_features = list(metadata.get("factor_features", []) or [])
+
+        # The full inference contract: raw predictors + derived factor scores.
+        self.features = self.predictor_columns + [
+            feature
+            for feature in self.factor_features
+            if feature not in self.predictor_columns
+        ]
+
+    @property
+    def pipe(self):
+        """The saved full pipeline (alias used by the contract tests)."""
+        return self.pipeline
 
     @classmethod
     def load(cls, model_path=None):
@@ -95,7 +118,18 @@ class OperationalRiskPredictor:
             pipeline=pipeline,
             predictor_columns=predictor_columns,
             labels=labels,
+            metadata=metadata,
         )
+
+    def _decode(self, class_value):
+        """Map a raw pipeline class index (or label) to a string label."""
+        if isinstance(class_value, str) and class_value in self.labels:
+            return class_value
+
+        try:
+            return self.labels[int(class_value)]
+        except (TypeError, ValueError, IndexError):
+            return str(class_value)
 
     def _to_raw_frame(self, record):
         """
@@ -121,6 +155,31 @@ class OperationalRiskPredictor:
 
         return raw_frame[self.predictor_columns]
 
+    def _frame(self, record):
+        """Build the cleaned, rare-grouped, factor-scored contract frame.
+
+        This reproduces the training-time contract frame exactly: canonical
+        categorical cleaning, persisted rare-category grouping and the saved
+        EFA factor scores. It is used by the deployment path and by the
+        contract regression tests.
+        """
+        raw_frame = self._to_raw_frame(record)
+
+        frame = dc.apply_serve_transform(
+            raw_frame,
+            self.numeric_features,
+            self.categorical_features,
+            self.rare_map,
+        )
+
+        if self.factor_features:
+            factors = dc.derive_factor_scores(frame)
+            for name in self.factor_features:
+                if name in factors.columns:
+                    frame[name] = factors[name].to_numpy()
+
+        return frame
+
     def predict(self, record):
         """
         Return the predicted class label and its probability.
@@ -136,7 +195,9 @@ class OperationalRiskPredictor:
         probabilities = self.pipeline.predict_proba(raw_frame)[0]
         predicted_class_index = int(np.argmax(probabilities))
 
-        predicted_label = self.pipeline.classes_[predicted_class_index]
+        predicted_label = self._decode(
+            self.pipeline.classes_[predicted_class_index]
+        )
         predicted_probability = float(
             probabilities[predicted_class_index]
         )
@@ -159,7 +220,7 @@ class OperationalRiskPredictor:
         class_labels = self.pipeline.classes_
 
         return {
-            str(label): float(probability)
+            self._decode(label): float(probability)
             for label, probability in zip(
                 class_labels,
                 probabilities,
@@ -180,7 +241,7 @@ class OperationalRiskPredictor:
 
         predictions = self.pipeline.predict(raw_frame)
 
-        return [str(prediction) for prediction in predictions]
+        return [self._decode(prediction) for prediction in predictions]
 
     def explain(self, record, top_k=12):
         """
@@ -222,9 +283,16 @@ class OperationalRiskPredictor:
                 shap_values = explainer.shap_values(transformed_record)
 
             elif hasattr(classifier, "coef_"):
+                # For a linear model SHAP contributions are
+                # coef * (x - E[background]). Using the record itself as the
+                # background collapses every contribution to zero, so a zero
+                # baseline is used to recover the additive logit attribution.
+                background = np.zeros_like(
+                    np.asarray(transformed_record, dtype=float)
+                )
                 explainer = shap.LinearExplainer(
                     classifier,
-                    transformed_record,
+                    background,
                 )
                 shap_values = explainer.shap_values(transformed_record)
 
@@ -291,18 +359,18 @@ class OperationalRiskPredictor:
 
             return {
                 "model": type(classifier).__name__,
-                "class_explained": self.pipeline.classes_[
-                    predicted_class_index
-                ],
-                "base_value": round(base_value, 5),
+                "class_explained": self._decode(
+                    self.pipeline.classes_[predicted_class_index]
+                ),
+                "base_value": round(float(base_value), 5),
                 "output": round(
-                    base_value + float(np.sum(class_contributions)),
+                    float(base_value) + float(np.sum(class_contributions)),
                     5,
                 ),
                 "contributions": [
                     {
                         "feature": feature,
-                        "shap": round(contribution, 5),
+                        "shap": round(float(contribution), 5),
                         "value": str(
                             example_record.get(feature, "")
                         ),
@@ -327,16 +395,14 @@ class OperationalRiskPredictor:
         if transformed_feature_name in self.predictor_columns:
             return transformed_feature_name
 
-        categorical_columns = [
-            column
-            for column in self.predictor_columns
-            if column not in self.pipeline.named_steps[
-                "preprocessing"
-            ].transformers_[0][2]
-        ]
+        preprocessing = self.pipeline.named_steps["preprocessing"]
+
+        known_columns = list(
+            getattr(preprocessing, "categorical_columns_", []) or []
+        ) + list(getattr(preprocessing, "numeric_columns_", []) or [])
 
         for column in sorted(
-            categorical_columns,
+            known_columns,
             key=len,
             reverse=True,
         ):

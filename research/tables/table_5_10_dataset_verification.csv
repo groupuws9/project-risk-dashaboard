@@ -1,11 +1,11 @@
 Verification Check,Expected Value,Actual Value,Status,Notes
-Total Observations,14,448,14,448,PASS,7 waves: 1980/1984/1990/1991/1998/2004/2011
-Total Variables,53,53,PASS,Includes identifiers, features, target
+Total Observations,"14,448","14,448",PASS,7 waves: 1980/1984/1990/1991/1998/2004/2011
+Total Variables,53,53,PASS,"Includes identifiers, features, target"
 Target Column Present,operational_risk_category,Present,PASS,Column exists in dataset
-Low Class Count,5,077,5,077,PASS,79.51% of modelled rows
+Low Class Count,"5,077","5,077",PASS,79.51% of modelled rows
 Medium Class Count,621,621,PASS,9.73% of modelled rows
 High Class Count,687,687,PASS,10.76% of modelled rows
-Modelled Rows,6,385,6,385,PASS,Rows with observed turnover rate
+Modelled Rows,"6,385","6,385",PASS,Rows with observed turnover rate
 Imbalance Ratio,7.4:1,7.4:1,PASS,Low:High class ratio
 Leakage Columns Excluded,14,14,PASS,Turnover family + risk indicators + duplicates
 Turnover in Features,False,False,PASS,Target basis not in feature set

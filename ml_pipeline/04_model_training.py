@@ -1,4 +1,4 @@
-﻿"""
+﻿﻿"""
 04_model_training.py — Train and validate operational-risk classifiers.
 
 Implements a leakage-safe, fold-safe machine-learning pipeline for
@@ -148,24 +148,7 @@ print("Test class distribution:", yte.value_counts().to_dict())
 # Identify numeric and categorical columns from outer training data
 # ---------------------------------------------------------------------------
 
-numeric_candidates = []
-categorical_candidates = []
-
-for column in Xtr_raw.columns:
-    series = Xtr_raw[column].replace(dc.MISS_TOKENS, np.nan)
-    coerced = pd.to_numeric(series, errors="coerce")
-
-    valid_count = series.notna().sum()
-    numeric_ratio = (
-        coerced.notna().sum() / valid_count
-        if valid_count > 0
-        else 0
-    )
-
-    if numeric_ratio > dc.NUMERIC_RATIO_THRESHOLD and coerced.nunique(dropna=True) > dc.CARDINALITY_THRESHOLD:
-        numeric_candidates.append(column)
-    else:
-        categorical_candidates.append(column)
+numeric_candidates, categorical_candidates = dc.classify_columns(Xtr_raw)
 
 print(f"Numeric candidate columns: {len(numeric_candidates)}")
 print(f"Categorical candidate columns: {len(categorical_candidates)}")
@@ -440,13 +423,15 @@ pd.DataFrame(fold_records).to_csv(
 )
 
 best_pipeline = fitted_pipelines[best_model_name]
-rare_category_transformer = best_pipeline.named_steps["rare_category"]
 
-rare_category_map = getattr(
-    rare_category_transformer,
-    "rare_category_map_",
-    {},
+# Persist the canonical train-derived rare-category map and the derived factor
+# contract, so the metadata always matches data_contract.build_model_frames().
+_, _, rare_category_map = dc.clean_frames(
+    Xtr_raw.copy(),
+    Xte_raw.copy(),
 )
+
+factor_features = list(dc.load_factor_artifact()["factor_names"])
 
 metadata = {
     "best_model": best_model_name,
@@ -455,6 +440,7 @@ metadata = {
     "features": predictor_columns,
     "numeric_features": numeric_candidates,
     "categorical_features": categorical_candidates,
+    "factor_features": factor_features,
     "leakage_excluded": dc.LEAKAGE,
     "high_cardinality_excluded": dc.HIGH_CARDINALITY_EXCLUSIONS,
     "rare_category_map": rare_category_map,

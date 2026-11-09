@@ -39,7 +39,7 @@ The authoritative merge (`ml_pipeline/01_build_dataset.py`):
 | Total observations | 14,448 (7 waves: 1980, 1984, 1990, 1991, 1998, 2004, 2011) |
 | Total variables | 53 |
 | Modelled rows (target available) | 6,385 (turnover observed in 1998/2004/2011) |
-| Model inputs | 37 (33 raw + 4 EFA factors; 9 numeric + 28 categorical) |
+| Model inputs | 37 (33 raw + 4 EFA factors; 5 numeric + 28 categorical) |
 | High-cardinality excluded | industry_code, industry_code_80 (SIC codes) |
 | Target variable | operational_risk_category |
 | Target classes | 3 (Low / Medium / High) |
@@ -85,7 +85,7 @@ The authoritative merge (`ml_pipeline/01_build_dataset.py`):
 
 - **33 leakage-safe raw predictors** (after dropping high-cardinality SIC codes)
 - **4 EFA factor scores** (latent constructs from factor analysis)
-- **9 numeric + 28 categorical** features
+- **5 numeric + 28 categorical** features
 
 ---
 

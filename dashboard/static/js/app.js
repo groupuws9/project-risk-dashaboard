@@ -3,10 +3,21 @@
 // insights, what-if simulator.  (Spec 3 §3.6 — runtime validation on the client)
 let META = {features: [], labels: ["Low", "Medium", "High"]};
 
+// Sector is presented as its raw WERS `tsector3` code with a neutral label
+// ("Sector 1" / "Sector 2" / "Sector 3") rather than any real-world name, so
+// the extract's labels are not surfaced in the UI.  Blank or non-numeric
+// values render as "Unknown" (the backend already emits "Unknown" for a blank
+// sector group), keeping the chart axis unambiguous.
+function sectorLabel(value) {
+  if (value === "" || value === null || value === undefined) return "Unknown";
+  const n = Number(value);
+  return Number.isNaN(n) ? String(value) : ("Sector " + n);
+}
+
 // [name, label, {req, min, max, type}]  — ranges mirror dashboard/validation.py
 const FIELD_DEFS = [
   ["org_size_category_3", "Org size (3-cat: 1 small - 3 large)", {req: 1, min: 1, max: 3, group: "org"}],
-  ["sector", "Sector (1-10)", {req: 1, min: 1, max: 10, group: "org"}],
+  ["sector", "Sector code (1, 2, 3)", {req: 1, min: 1, max: 10, group: "org"}],
   ["sector_detailed", "Detailed sector code", {min: 0, max: 99, group: "org"}],
   ["multinational", "Multinational (0/1/2)", {req: 1, min: 0, max: 2, group: "org"}],
   ["org_age_years", "Org age band", {min: 0, max: 99, group: "org"}],
@@ -300,7 +311,7 @@ async function init() {
   ensureForms();
   try { const r = await fetch("/api/metadata"); if (r.ok) META = await r.json(); } catch (e) {}
   const fs = document.getElementById("f-sector");
-  ["1", "2", "3"].forEach(v => { const o = document.createElement("option"); o.value = v; o.textContent = "Sector " + v; fs.appendChild(o); });
+  ["1", "2", "3"].forEach(v => { const o = document.createElement("option"); o.value = v; o.textContent = sectorLabel(v); fs.appendChild(o); });
   const fz = document.getElementById("f-size");
   ["1", "2", "3"].forEach(v => { const o = document.createElement("option"); o.value = v; o.textContent = "Size " + v; fz.appendChild(o); });
   // Auto-load insights on page load
@@ -429,16 +440,22 @@ document.getElementById("explore-btn").onclick = async (ev) => {
   const z = document.getElementById("f-size").value;
   try {
     const j = await apiFetch("/api/data/summary?sector=" + s + "&size=" + z);
+    // The backend exposes the descriptive turnover-rate mean (not a model
+    // score): turnover_rate_mean / turnover_rate_by_sector.
+    const meanTurnover = (j.turnover_rate_mean === null ||
+      j.turnover_rate_mean === undefined)
+      ? "n/a"
+      : Number(j.turnover_rate_mean).toFixed(2);
     document.getElementById("explore-out").innerHTML =
-      "<div class='card'><b>n=" + j.n + "</b> &bull; mean score=" +
-      (j.mean_score || 0).toFixed(2) + " &bull; " +
+      "<div class='card'><b>n=" + j.n + "</b> &bull; mean turnover rate=" +
+      meanTurnover + " &bull; " +
       JSON.stringify(j.risk_distribution) + "</div>";
     const d = j.risk_distribution || {};
     barChart("chart-dist", Object.keys(d), Object.values(d),
       "Risk distribution (filtered)");
-    const bs = j.by_sector || {};
-    barChart("chart-sector", Object.keys(bs), Object.values(bs),
-      "Mean risk score by sector", "#60a5fa");
+    const bs = j.turnover_rate_by_sector || {};
+    barChart("chart-sector", Object.keys(bs).map(sectorLabel), Object.values(bs),
+      "Mean turnover rate by sector", "#60a5fa");
   } catch (e) { handleApiError(e, null, document.getElementById("explore-out")); }
   finally { setLoading(btn, false); }
 };
@@ -469,9 +486,13 @@ async function loadInsights() {
         html += "<div style='margin:8px 0;padding-left:20px'>";
         Object.entries(j.metrics).forEach(([model, acc]) => {
           const isBest = model === j.best_model;
+          // Models without a held-out score arrive as null → render "n/a".
+          const value = (typeof acc === "number" && isFinite(acc))
+            ? acc.toFixed(3)
+            : "n/a";
           html += "<div style='margin:6px 0;color:#cbd5e1;line-height:1.4" +
             (isBest ? ";color:#4ade80;font-weight:bold" : "") + "'>" +
-            "• " + model + ": " + (typeof acc === 'number' ? acc.toFixed(3) : acc) +
+            "• " + model + ": " + value +
             (isBest ? " ✓" : "") + "</div>";
         });
         html += "</div>";

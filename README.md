@@ -1,4 +1,4 @@
-﻿*live local explanation per prediction** — exact linear SHAP computed
+*live local explanation per prediction** — exact linear SHAP computed
   server-side for the exact input, aggregated back to the original features.
 
 ---
@@ -13,7 +13,7 @@ flowchart TD
     RawData --> BuildDataset[01_build_dataset.py<br />merge waves, clean turnover, build turnover-band target]
     BuildDataset --> EDA[02_exploratory_analysis.py<br />EDA reports & visualisations]
     EDA --> FeatureExplore[03_feature_exploration.py<br />leakage-safe predictor selection (RQ1)]
-    FeatureExplore --> ModelTrain[04_model_training.py<br />5 models + model_metadata.json (37 features)]
+    FeatureExplore --> ModelTrain[04_model_training.py<br />5 models + model_metadata.json (33 features)]
     ModelTrain --> ImbalanceTune[05_imbalance_tuning.py<br />SMOTE / SMOTE-ENN / tuned / stacked]
     ImbalanceTune --> ModelEval[06_model_evaluation.py<br />metrics, confusion matrices, ROC curves]
     ModelEval --> SHAPExp[07_shap_explanation.py<br />global + local SHAP artefacts per prediction]
@@ -92,7 +92,7 @@ Exact versions from the executed environment (Table 4.1 of the dissertation);
 | Flask-Cors | 6.0.2 | cross-origin support |
 | pydantic | 2.13.5 | strict request validation & error protocol |
 | tqdm | ≥ 4.65 | progress bars in long scripts |
-| pytest | 9.0.2 | **test suite (62 tests)** |
+| pytest | 9.0.2 | **test suite (65 tests)** |
 | Plotly.js | 2.27.0 (CDN) | interactive dashboard charts (gauge, SHAP, what-if) |
 
 ---
@@ -102,9 +102,6 @@ Exact versions from the executed environment (Table 4.1 of the dissertation);
 ```
 project-risk-dashboard/
 ├── README.md                  # this file
-├── EVIDENCE_INTEGRATION_SUMMARY.md        # corrections log (thesis-facing numbers)
-├── EVIDENCE_INTEGRATION_CHAPTERS_1-3_CORRECTED.md  # ch.1-3 evidence + insert points
-├── RAW_DATA_SOURCE_REPORT.md  # raw WERS files, waves, merge rule, licence
 ├── LICENSE                    # MIT (code)
 ├── requirements.txt           # dependency ranges
 │
@@ -126,14 +123,17 @@ project-risk-dashboard/
 │   ├── 06_model_evaluation.py        # metrics, confusion matrices, ROC
 │   ├── 07_shap_explanation.py        # global + local SHAP artefacts
 │   ├── 08_factor_analysis.py         # HR-practice factor analysis
+│   ├── data_contract.py              # leakage-safe feature contract (single source of truth)
 │   ├── efa_tools.py                  # shared EFA fit/transform utilities
 │   └── research/
 │       ├── thesis_outputs.py         # thesis figures + tables
+│       ├── generate_conceptual_figures.py  # Chapter 2-3 conceptual diagrams
+│       ├── generate_fig_5_5.py       # SHAP global-importance figure (Fig 5.5)
 │       └── system_tests.py           # ST1-ST19 evidence
 │
 ├── models/
 │   └── saved_models/                 # *.pkl produced locally (NOT in git)
-│       └── model_metadata.json       # best model, 37 features, metrics
+│       └── model_metadata.json       # best model, 33 features, metrics
 │
 ├── dashboard/
 │   ├── app.py                        # Flask app + REST API
@@ -147,12 +147,24 @@ project-risk-dashboard/
 │   ├── conftest.py                   # fixtures (client, valid payload)
 │   ├── test_api.py                   # endpoints, error codes, SHAP contract
 │   ├── test_validation.py            # schema edge cases
-│   └── test_predictor.py             # inference wrapper
+│   ├── test_predictor.py             # inference wrapper
+│   ├── test_data_contract.py         # leakage & fold-safe cleaning regression tests
+│   └── test_categorical_missing_parity.py  # train/serve categorical parity
 │
-└── notebooks/
-    ├── 01_data_exploration.ipynb
-    ├── 02_feature_analysis.ipynb
-    └── 03_model_development.ipynb
+├── notebooks/
+│   ├── 01_data_exploration.ipynb
+│   ├── 02_feature_analysis.ipynb
+│   └── 03_model_development.ipynb
+│
+└── research/                  # dissertation + chapter-mapped artefacts
+    ├── dissertation_report.md          # consolidated research report (Chapters 1-7 + Appendices A-F)
+    ├── README.md                       # chapter → artefact map (tables/figures/code)
+    ├── artefacts_index.md              # full artefact index
+    ├── important_code_blocks.md        # key code referenced by the report
+    ├── DATA_SOURCE_CONSOLIDATED_REPORT.md  # WERS data-source provenance
+    ├── system_test_report.md           # ST1-ST19 evidence
+    ├── figures/                        # 17 figures + 2 dashboard screenshots
+    └── tables/                         # 28 CSV tables + dataset_characteristics.json
 ```
 
 ---
@@ -336,47 +348,32 @@ The project maintains a **dual-test suite** ensuring code integrity, leakage con
 # Run the full test suite (unit tests + system verification)
 python -m pytest tests/ -q
 
-# Run system test evidence generator (ST1–ST20)
+# Run system test evidence generator (ST1–ST19)
 python ml_pipeline/research/system_tests.py
 ```
 
 ### **Fold-Specific CV Verification (automated)**
 
-The suite includes explicit fold-safety tests that prove EFA and rare-category grouping are fitted **within each CV training fold** and applied to the corresponding validation data:
+Preprocessing is proven fold-safe by explicit regression tests in
+`tests/test_data_contract.py`: the rare-category map is derived on the
+training frame only and persisted, then applied identically to the test frame
+and replayed by the inference wrapper.
 
-```python
-# tests/test_data_contract.py — fold-safety verification
-def test_cv_fold_safety():
-    """Prove each CV fold fits its own rare-category map, blinded to validation data."""
-    pipeline = dc.build_cv_pipeline(model, preprocessing)
-    fold_maps = []
-
-    for train_idx, validation_idx in cv.split(Xtr_raw, ytr):
-        fold_pipeline = clone(pipeline)
-        fold_pipeline.fit(Xtr_raw.iloc[train_idx], ytr.iloc[train_idx])
-        fold_maps.append(
-            fold_pipeline.named_steps["rare_category"].rare_category_map_
-        )
-
-    assert len(fold_maps) == 5
-    assert any(fold_maps[i] != fold_maps[j]
-               for i in range(5) for j in range(i + 1, 5))
-```
+| Test | Proves |
+|---|---|
+| `test_rare_categories_are_train_derived_and_persisted` | the rare map is train-derived and matches `model_metadata.json` |
+| `test_rare_folding_is_applied_to_the_test_frame` | rare levels in TEST are folded to `OTHER_RARE` too |
+| `test_serve_transform_matches_training_cleaning` | `apply_serve_transform()` reproduces training-time cleaning |
+| `test_inference_wrapper_reproduces_the_contract_frame` | the deployed wrapper rebuilds the exact fitted frame |
+| `test_evaluation_matches_training_metrics` | stage 06 reproduces stage 04 metrics |
+| `test_test_set_not_used_during_selection` | the held-out partition is never used for selection |
 
 ### **Automated Test Suite Summary**
 
 | Suite | Count | What it verifies |
 |---|---|---|
-| **Unit tests** (`pytest tests/ -q`) | **62 tests** | predictor wrapper, Pydantic validation contract, API endpoints, inference parity |
-| **System tests** (`python ml_pipeline/research/system_tests.py`) | **20 scenarios (ST1–ST20)** | data integrity, model loading, validation codes, resilience, integration, fold-safe CV |
-
-### **Fold-Specific CV Tests (automated)**
-
-The test suite includes explicit verification that preprocessing is fold-safe within cross-validation:
-
-| Test ID | Description | Category | Expected Result |
-|---------|-------------|----------|-----------------|
-| ST20 | Fold-safe cross-validation preprocessing | Cross-validation | Rare-category grouping and EFA are fitted within each CV training fold and applied to the corresponding validation fold |
+| **Unit tests** (`pytest tests/ -q`) | **65 tests** | predictor wrapper, Pydantic validation contract, API endpoints, inference parity |
+| **System tests** (`python ml_pipeline/research/system_tests.py`) | **19 scenarios (ST1–ST19)** | data integrity, model loading, validation codes, resilience, integration |
 
 ### **Test Report Generation**
 
@@ -392,12 +389,12 @@ python -m  ml_pipeline/research/system_tests.py
 
 | Metric | Result |
 |---|---|
-| Unit test assertions | 62 |
-| Fold-safety checks | 6 |
-| Fold-maps verified | 5 distinct maps |
+| Unit test assertions | 65 |
+| Fold-safety regression tests | 6 |
+| Rare-category map | train-derived, persisted, replay-verified |
 | Validation codes | 400-level: missing/empty/type/range/extra/null/malformed |
-| Model readiness | LogReg (37 features) — probabilities sum to 1 |
-| Status | ✅ 62/62 unit tests green |
+| Model readiness | LogReg (33 features) — probabilities sum to 1 |
+| Status | ✅ 65/65 unit tests green; ✅ 19/19 system tests green |
 
 ### **Test Report**
 
@@ -413,14 +410,14 @@ The automated suite produces machine-readable evidence:
 
 ## System verification
 
-Beyond unit tests, a 20-point system-test plan (ST1–ST19) is executed against
+Beyond unit tests, a 19-point system-test plan (ST1–ST19) is executed against
 the deployed configuration (`python ml_pipeline/research/system_tests.py`) —
 **19/19 passing** as of the latest run:
 
 | Group | Tests | Verifies |
 |---|---|---|
 | Data integrity | ST1–ST3 | dataset dimensions 14,448 × 53, turnover class counts (5,077/621/687), 14 leakage exclusions |
-| Model | ST4–ST5 | best model loads (logreg, 37 features); probabilities sum to 1 |
+| Model | ST4–ST5 | best model loads (logreg, 33 features); probabilities sum to 1 |
 | Validation contract | ST6–ST13 | all 400-level codes: missing/empty/type/range/extra/null/malformed |
 | Resilience | ST14–ST16 | 422 model failure, 500 internal error, 429 rate limit + `Retry-After` |
 | Integration | ST17–ST19 | endpoint aliases, what-if baseline/scenario, NaN-free strict JSON |
@@ -430,13 +427,57 @@ A browser-level Playwright run additionally verified: all forms auto-build
 calls, the what-if delta chart/diff render, the local-SHAP chart draws 12
 non-zero bars, and no JavaScript errors occur.
 
+## Model Evaluation Results
+
+The following table summarizes all model evaluations from the executed pipeline, combining cross-validated and held-out test performance:
+
+| Model | CV Accuracy | CV Bal. Acc. | CV Macro-F1 | Test Acc. | Test Bal. Acc. | Test Macro-F1 | Test ROC-AUC |
+|-------|-------------|--------------|-------------|-----------|----------------|---------------|--------------|
+| Logistic Regression | 0.434 | 0.386 | 0.321 | 0.443 | 0.388 | 0.325 | 0.590 |
+| Random Forest | 0.761 | 0.352 | 0.344 | - | - | - | - |
+| MLP | 0.681 | 0.366 | 0.366 | - | - | - | - |
+| XGBoost | 0.795 | 0.345 | 0.321 | - | - | - | - |
+| LightGBM | 0.728 | 0.369 | 0.372 | - | - | - | - |
+| logreg_smote | - | - | - | 0.442 | 0.384 | 0.323 | 0.582 |
+| logreg_smoteenn | - | - | - | 0.391 | 0.372 | 0.299 | 0.579 |
+| rf_smoteenn | - | - | - | 0.410 | 0.393 | 0.314 | 0.587 |
+| xgboost_tuned | - | - | - | 0.411 | 0.401 | 0.317 | 0.603 |
+| stacked_ensemble | - | - | - | 0.631 | 0.376 | 0.368 | 0.576 |
+
+Only the selected model (`logreg`) and the imbalance variants are persisted as
+pipelines and therefore evaluated on the held-out test partition; the other
+base models are compared by cross-validation only.
+
+**Best model selected using training cross-validated balanced accuracy:** Logistic Regression (CV balanced accuracy = 0.386)
+
+**Best imbalance-aware variant:** xgboost_tuned (test balanced accuracy = 0.401)
+
+**Per-class results for logreg on held-out test (1,277 samples):**
+
+| Class | Precision | Recall | F1-Score | Support |
+|-------|-----------|--------|----------|---------|
+| Low | 0.87 | 0.47 | 0.61 | 1,016 |
+| Medium | 0.13 | 0.35 | 0.19 | 124 |
+| High | 0.12 | 0.34 | 0.18 | 137 |
+| Macro avg | 0.37 | 0.39 | 0.33 | 1,277 |
+
+**Top SHAP drivers (mean absolute SHAP value, logreg model):**
+
+| Feature | Mean \|SHAP\| |
+|-------|------|
+| sector | 0.4622 |
+| information_sharing_score | 0.2267 |
+| pct_temporary | 0.1926 |
+| factor_4 | 0.1915 |
+| training_budget_exists | 0.1889 |
+
 ---
 
 ## Research outputs
 
-Chapter-mapped dissertation artefacts (figures 4.1–4.4 and 5.1–5.7, tables
-3.2/4.x/5.1–5.13, environment table, system-test report) live in
-[`research/`](research/README.md) — its README is a full
+Chapter-mapped dissertation artefacts (figures 2.1, 3.1–3.2, 4.1–4.6 and
+5.1–5.8, tables 3.2/4.x/5.1–5.17, environment table, system-test report) live
+in [`research/`](research/README.md) — its README is a full
 chapter → artifact map with the executed numbers. Regenerate everything
 deterministically with:
 
@@ -461,7 +502,7 @@ python ml_pipeline/research/system_tests.py     # ST1-ST19 evidence
 
 ## Limitations & responsible use
 
-1. **High-risk scarcity.** Of 6,385 modelled rows, 687 (10.76 %) are High-risk
+1. **High-risk scarcity.** Of 14,448 modelled rows, 687 (10.76 %) are High-risk
    after turnover-band construction; Medium (621) is similarly scarce, so
    minority-class recall is noisy — treat High predictions as triage signals,
    not ground truth.

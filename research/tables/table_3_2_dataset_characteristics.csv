@@ -2,7 +2,7 @@ Attribute,Value
 Unit of analysis,Workplace (organization)
 Observations,"14,448"
 Total variables,53
-Predictive features,37
+Predictive features,33
 Target variable,operational_risk_category
 Target classes,3 (Low / Medium / High)
 Class balance (Low/Med/High),"5,077 / 621 / 687"
