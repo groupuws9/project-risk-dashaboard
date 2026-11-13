@@ -7,28 +7,28 @@
 ```mermaid
 flowchart TD
     %% Raw data source
-    WERS[WERS .tab data<br />(raw survey waves 1980–2011)] -->|raw CSV/TAB| RawData[Raw data files<br />NOT in git<br />(UK Data Service EUL)]
+    WERS["WERS .tab data<br/>(raw survey waves 1980-2011)"] -->|"raw CSV/TAB"| RawData["Raw data files<br/>NOT in git<br/>(UK Data Service EUL)"]
 
     %% Pipeline steps
-    RawData --> BuildDataset[01_build_dataset.py<br />merge waves, clean turnover, build turnover-band target]
-    BuildDataset --> EDA[02_exploratory_analysis.py<br />EDA reports & visualisations]
-    EDA --> FeatureExplore[03_feature_exploration.py<br />leakage-safe predictor selection (RQ1)]
-    FeatureExplore --> ModelTrain[04_model_training.py<br />5 models + model_metadata.json (33 features)]
-    ModelTrain --> ImbalanceTune[05_imbalance_tuning.py<br />SMOTE / SMOTE-ENN / tuned / stacked]
-    ImbalanceTune --> ModelEval[06_model_evaluation.py<br />metrics, confusion matrices, ROC curves]
-    ModelEval --> SHAPExp[07_shap_explanation.py<br />global + local SHAP artefacts per prediction]
-    SHAPExp --> FactorAnal[08_factor_analysis.py<br />HR-practice factor analysis]
+    RawData --> BuildDataset["01_build_dataset.py<br/>merge waves, clean turnover, build turnover-band target"]
+    BuildDataset --> EDA["02_exploratory_analysis.py<br/>EDA reports &amp; visualisations"]
+    EDA --> FeatureExplore["03_feature_exploration.py<br/>leakage-safe predictor selection (RQ1)"]
+    FeatureExplore --> ModelTrain["04_model_training.py<br/>5 models + model_metadata.json (33 features)"]
+    ModelTrain --> ImbalanceTune["05_imbalance_tuning.py<br/>SMOTE / SMOTE-ENN / tuned / stacked"]
+    ImbalanceTune --> ModelEval["06_model_evaluation.py<br/>metrics, confusion matrices, ROC curves"]
+    ModelEval --> SHAPExp["07_shap_explanation.py<br/>global + local SHAP artefacts per prediction"]
+    SHAPExp --> FactorAnal["08_factor_analysis.py<br/>HR-practice factor analysis"]
 
     %% Model output
-    FactorAnal --> SavedModel[saved_models<br />*.pkl pipelines<br />(NOT in git)]
+    FactorAnal --> SavedModel["saved_models<br/>*.pkl pipelines<br/>(NOT in git)"]
 
     %% API & Dashboard
-    SavedModel -->|trained Pipeline| FlaskAPI[Flask REST API<br />(app.py)]
-    FlaskAPI -->|/api/predict| Prediction[Prediction with live SHAP explanation]
-    FlaskAPI -->|/api/whatif| WhatIf[What-if scenario simulator<br />same validator & model]
-    FlaskAPI -->|/api/insights| Insights[Insights endpoints]
-    FlaskAPI -->|/api/features| Features[Features endpoints]
-    FlaskAPI -->|/api/data/*| Data[Data endpoints]
+    SavedModel -->|"trained Pipeline"| FlaskAPI["Flask REST API<br/>(app.py)"]
+    FlaskAPI -->|"/api/predict"| Prediction["Prediction with live SHAP explanation"]
+    FlaskAPI -->|"/api/whatif"| WhatIf["What-if scenario simulator<br/>same validator &amp; model"]
+    FlaskAPI -->|"/api/insights"| Insights["Insights endpoints"]
+    FlaskAPI -->|"/api/features"| Features["Features endpoints"]
+    FlaskAPI -->|"/api/data/*"| Data["Data endpoints"]
 
     %% Train-serve parity note
     style BuildDataset fill:#e1f5fe,stroke:#01579b,stroke-width:2px
@@ -167,27 +167,82 @@ project-risk-dashboard/
 
 ## Installation
 
-**Prerequisites:** Python 3.11+ (developed and verified on 3.13.3), pip, git.
+A complete, beginner-friendly setup. Follow the steps **in order** — do not
+skip the virtual-environment step, or this project's package versions can
+clash with other Python projects on your machine.
+
+**Prerequisites** (install these first if you don't have them):
+
+| Tool | Minimum | Check it with |
+|---|---|---|
+| Python | 3.11+ (developed on **3.13.3**) | `python --version` |
+| pip | bundled with Python | `pip --version` |
+| Git | any recent version | `git --version` |
+
+### Step 1 — Get the code
+
+```bash
+git clone https://github.com/groupuws9/project-risk-dashaboard.git
+cd project-risk-dashaboard
+```
+
+### Step 2 — Create a virtual environment
+
+A *virtual environment* (venv) is an isolated folder holding this project's
+own copy of its Python packages, so they never interfere with other projects.
+Create it **once**, from the project root:
+
+```bash
+python -m venv .venv
+```
+
+This produces a `.venv/` folder next to `README.md`.
+
+### Step 3 — Activate the virtual environment
+
+You must activate the venv **every time you open a new terminal** to work on
+the project. Pick the line for your shell:
+
+```bash
+# Windows (PowerShell)
+.venv\Scripts\Activate.ps1
+
+# Windows (Command Prompt)
+.venv\Scripts\activate.bat
+
+# macOS / Linux
+source .venv/bin/activate
+```
+
+When it works, your prompt is prefixed with `(.venv)`. To leave it later, type
+`deactivate`.
+
+> **PowerShell blocks the script?** If you see *"running scripts is disabled on
+> this system"*, run this once, then retry:
+> `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
+
+### Step 4 — Install the dependencies
+
+With `(.venv)` visible in your prompt:
 
 ```bash
 pip install -r requirements.txt
-git clone <your-fork-url>
-cd project-risk-dashboard
-
-python -m venv .venv
-# Windows
-.venv\Scripts\activate
-# macOS/Linux
-source .venv/bin/activate
-
-pip install -r requirements.txt
 ```
 
-**Data:** the raw WERS time-series files (waves 1980–2011) must be obtained
-separately from the [UK Data Service](https://ukdataservice.ac.uk/) (Study 4511)
-under its End User Licence, then placed in `data/`. If
-`data/processed/` already contains `wers_operational_risk_merged.csv`, you can
-skip straight to [Running](#running-the-project).
+### Step 5 — (Optional) verify the install
+
+```bash
+python -m pytest tests/ -q
+```
+
+### Step 6 — Provide the data
+
+The raw WERS time-series files (waves 1980–2011) are **not** in this
+repository — they must be obtained separately from the
+[UK Data Service](https://ukdataservice.ac.uk/) (Study 4511) under its End User
+Licence, then placed in `data/raw/`. If `data/processed/` already contains
+`wers_operational_risk_merged.csv`, you can skip straight to
+[Running the project](#running-the-project).
 
 ---
 
