@@ -1,0 +1,118 @@
+
+EXPLORATORY DATA ANALYSIS REPORT
+WIRS/WERS Workplace-Panel Operational-Risk (turnover-based) Prediction, 1980-2011
+================================================================================
+
+Generated: 2026-11-11 23:01:58
+Dataset: wers_operational_risk_merged.csv
+
+================================================================================
+1. DATA OVERVIEW
+================================================================================
+
+Total Observations: 14,448
+Total Variables: 53
+Survey Waves: [np.int64(1980), np.int64(1984), np.int64(1990), np.int64(1991), np.int64(1998), np.int64(2004), np.int64(2011)]
+Duplicate Rows: 0
+
+Turnover target coverage:
+  Rows with a measurable turnover target: 6,385
+  Rows without (early waves 1980-1991, turnover not asked): 8,063
+  -> The turnover-based target is defined only for the 1998/2004/2011 waves;
+     earlier waves are retained for descriptive/historical context.
+
+Target Variable Distribution (turnover-measurable rows):
+operational_risk_category
+Low       5077
+High       687
+Medium     621
+
+Turnover Rate Statistics (operational_risk_score, % 0-100):
+  Mean: 7.51
+  Median: 1.90
+  Std Dev: 14.15
+  Min: 0.00
+  Max: 100.00
+
+================================================================================
+2. MISSING VALUES ANALYSIS
+================================================================================
+
+Total Missing Values: 24,189
+Variables with Missing: 3
+
+Top 10 Variables with Most Missing:
+                            Missing Count  Missing %
+employee_turnover_rate               8063      55.81
+operational_risk_category            8063      55.81
+operational_risk_score               8063      55.81
+serno                                   0       0.00
+year                                    0       0.00
+absenteeism_rate                        0       0.00
+grievance_procedure_formal              0       0.00
+disputes_raised                         0       0.00
+dispute_risk_level                      0       0.00
+other_industrial_action                 0       0.00
+
+================================================================================
+3. KEY FINDINGS
+================================================================================
+
+1. Data Quality:
+   - Dataset contains 14,448 observations with 53 variables
+   - 3 variables have missing values
+   - 8,063 rows (1980-1991 waves) have no turnover target
+
+2. Risk Distribution (turnover-measurable rows only, n = 6,385):
+   - Mean turnover rate: 7.51% (scale 0-100)
+   - Class balance (Low/Medium/High): 79.5% / 9.7% / 10.8%
+   - 687 organizations classified as High risk
+   - Turnover bands: Low <=10%, Medium 10-20%, High >20%
+
+3. Data Characteristics:
+   - Mix of numerical and categorical variables
+   - Survey weights available for weighted analysis
+   - Organization-level data with various size categories
+
+================================================================================
+4. RECOMMENDATIONS
+================================================================================
+
+1. Data Preprocessing:
+   - Address class imbalance using SMOTE, class weights, or stratified sampling
+   - Impute missing values based on variable type and distribution
+   - Standardize/normalize numerical features for ML algorithms
+   - Encode categorical variables using one-hot or ordinal encoding
+
+2. Feature Engineering:
+   - Create interaction features (e.g., size × union coverage)
+   - Develop composite indices (e.g., HR practices index)
+   - Consider polynomial features for non-linear relationships
+   - Perform feature selection to reduce dimensionality
+
+3. Modeling Strategy:
+   - Start with baseline models (Logistic Regression, Decision Tree)
+   - Compare ensemble methods (Random Forest, XGBoost, LightGBM)
+   - Consider neural networks for complex patterns
+   - Use cross-validation for robust evaluation
+   - Address class imbalance in model training
+
+4. Evaluation Metrics:
+   - Use balanced accuracy, precision, recall, F1-score
+   - Generate ROC curves and AUC scores
+   - Analyze confusion matrices
+   - Calculate per-class performance metrics
+   - Consider business cost of false positives vs false negatives
+
+================================================================================
+5. NEXT STEPS
+================================================================================
+
+1. Run feature engineering script: python 03_feature_exploration.py
+2. Train baseline models: python 04_model_training.py
+3. Evaluate model performance: python 06_model_evaluation.py
+4. Develop interactive dashboard: python dashboard/app.py
+
+================================================================================
+END OF EDA REPORT
+================================================================================

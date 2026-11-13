@@ -1,0 +1,55 @@
+Factor Analysis Report — WIRS/WERS workplace-panel HR practices (1980-2011)
+============================================================
+Items: 15  |  N: 14448
+Bartlett test: chi2=27952.87, df=105, p=0.000e+00
+KMO overall: 0.580
+KMO per item: {'union_coverage_pct': 0.5396764194442677, 'collective_bargaining': 0.4704997722341317, 'bargaining_level_org': 0.4615033240355034, 'bargaining_level_est': 0.3407619421487471, 'formal_hr_strategy': 0.744276118004939, 'performance_appraisal_pct': 0.6550970651568686, 'training_budget_exists': 0.7614215206545331, 'job_security_policy': 0.5414228949021943, 'jcc_exists': 0.743664116219847, 'jcc_frequency': 0.6302868046437943, 'information_sharing_score': 0.5734619274857762, 'consultation_depth': 0.5679419017174823, 'employee_voice_channels': 0.547650672980605, 'info_chain_exist': 0.7824585494170576, 'newsletter_exists': 0.7736692822859139}
+Eigenvalues: [2.582, 1.761, 1.283, 1.128, 1.091, 1.014, 0.967, 0.852, 0.811, 0.786, 0.727, 0.662, 0.607, 0.424, 0.304]
+Parallel analysis (P95, 500 sims, seed 42) retains: 5
+Kaiser (eigenvalue > 1) retains: 6
+Factors retained (bounded 2-4): 4
+Extraction: principal axis factoring + varimax rotation (statsmodels)
+
+Rotated loadings (varimax):
+                           factor_1  factor_2  factor_3  factor_4
+union_coverage_pct           -0.318    -0.163    -0.368     0.064
+collective_bargaining        -0.337    -0.128    -0.363     0.013
+bargaining_level_org          1.204     0.054     0.013    -0.018
+bargaining_level_est         -0.047     0.041     0.556    -0.016
+formal_hr_strategy            0.051     0.036     0.071    -0.476
+performance_appraisal_pct     0.053    -0.012     0.123    -0.127
+training_budget_exists        0.018     0.062     0.111    -0.547
+job_security_policy           0.085     0.133     0.015     0.058
+jcc_exists                    0.111     0.132     0.388    -0.148
+jcc_frequency                 0.002     0.059     0.176    -0.083
+information_sharing_score    -0.002     0.390    -0.172    -0.493
+consultation_depth            0.064     0.080     0.184     0.092
+employee_voice_channels       0.083     1.050     0.036    -0.047
+info_chain_exist              0.056     0.068     0.034    -0.478
+newsletter_exists             0.094     0.098     0.053    -0.553
+
+Items with |loading| > 0.40 per factor:
+                           factor_1  factor_2  factor_3  factor_4
+union_coverage_pct            False     False     False     False
+collective_bargaining         False     False     False     False
+bargaining_level_org           True     False     False     False
+bargaining_level_est          False     False      True     False
+formal_hr_strategy            False     False     False      True
+performance_appraisal_pct     False     False     False     False
+training_budget_exists        False     False     False      True
+job_security_policy           False     False     False     False
+jcc_exists                    False     False     False     False
+jcc_frequency                 False     False     False     False
+information_sharing_score     False     False     False      True
+consultation_depth            False     False     False     False
+employee_voice_channels       False      True     False     False
+info_chain_exist              False     False     False      True
+newsletter_exists             False     False     False      True
+
+Construct hints: {'factor_1': 'bargaining_level_org / collective_bargaining', 'factor_2': 'employee_voice_channels / information_sharing_score', 'factor_3': 'bargaining_level_est / jcc_exists', 'factor_4': 'newsletter_exists / training_budget_exists'}
+
+Outputs: results/tables/factor_loadings.csv,
+         results/features/factor_scores.csv,
+         results/features/factor_scoring.json,
+         models/saved_models/factor_scoring.json (inference scoring),
+         results/figures/factor_scree.png

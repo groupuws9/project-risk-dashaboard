@@ -1,4 +1,0 @@
-Model,Class,Precision,Recall,F1-Score,Support
-Logistic Regression,Low,0.87,0.47,0.61,1016
-Logistic Regression,Medium,0.13,0.35,0.19,124
-Logistic Regression,High,0.12,0.34,0.18,137

@@ -15,7 +15,11 @@ data/processed/*.csv
 
 # Outputs (regenerate locally)
 models/saved_models/*.pkl
-results/
+
+# results/ is tracked; only the research reports and figure images are ignored
+results/research/
+results/figures/
+
 scripts/*_log.txt
 scripts/*_err.txt
 

@@ -1,0 +1,158 @@
+
+FEATURE ENGINEERING REPORT
+WIRS/WERS Workplace-Panel Operational-Risk (turnover-based) Prediction, 1980-2011
+================================================================================
+
+Generated: 2026-11-11 23:02:06
+
+================================================================================
+1. PROCESSING SUMMARY
+================================================================================
+
+Original Dataset:
+  - Observations: 14,448
+  - Features: 33
+
+After Feature Engineering:
+  - Observations: 14,448
+  - Features: 29
+  - Reduction: 12.1%
+
+================================================================================
+2. PROCESSING STEPS APPLIED
+================================================================================
+
+1. Data Validation:
+   - Checked for infinite values
+   - Removed duplicate columns
+   - Removed constant features (zero variance)
+   - Identified features with high missing rates (>80%)
+
+2. Missing Value Imputation:
+   - Numerical features: Median imputation
+   - Categorical features: Most frequent imputation
+   - Result: Zero missing values after imputation
+
+3. Outlier Treatment:
+   - Method: Winsorization at 1st and 99th percentiles
+   - Applied to all numerical features
+   - Preserved data distribution while reducing extreme values
+
+4. Feature Scaling:
+   - Method: Standard scaling
+   - Applied to all numerical features
+   - Ensures comparable feature magnitudes
+
+5. Categorical Encoding:
+   - Method: Label Encoding
+   - All categorical variables converted to numerical
+   - Encoders saved for future use
+
+6. Feature Selection:
+   - Removed highly correlated features (r > 0.95)
+   - Applied Random Forest feature importance
+   - Selected top 30 most important features
+   - Final feature set optimized for predictive performance
+
+================================================================================
+3. FEATURE IMPORTANCE RANKINGS
+================================================================================
+
+Top 20 Most Important Features:
+                  feature  importance
+      job_security_policy    0.168434
+       union_coverage_pct    0.085287
+performance_appraisal_pct    0.064594
+               pct_female    0.058957
+            pct_part_time    0.053690
+            pct_temporary    0.051538
+            org_age_years    0.050683
+       consultation_depth    0.040290
+     union_coverage_pct_6    0.037391
+          sector_detailed    0.033353
+            jcc_frequency    0.032740
+        newsletter_exists    0.031614
+  investment_plans_shared    0.030142
+        org_size_category    0.028431
+   training_budget_exists    0.026701
+                   sector    0.026367
+            workplace_age    0.025630
+information_sharing_score    0.024797
+         info_chain_exist    0.021337
+       formal_hr_strategy    0.019454
+
+================================================================================
+4. DATA QUALITY METRICS
+================================================================================
+
+Missing Values:
+  - Before imputation: 0
+  - After imputation: 0
+
+Duplicate Records: 0
+
+Class Distribution (Target Variable):
+operational_risk_category
+Low       5077
+High       687
+Medium     621
+
+Class Balance Ratio: 0.122
+
+================================================================================
+5. OUTPUT FILES GENERATED
+================================================================================
+
+1. wers_panel_features_engineered.csv
+   - Final processed dataset with engineered features
+   - Shape: (14448, 33)
+   - Ready for machine learning
+
+2. feature_importance.csv
+   - Feature importance rankings from Random Forest
+   - 29 features ranked
+
+3. feature_list.json
+   - JSON file with selected features and metadata
+   - Includes feature names and processing parameters
+
+4. feature_engineering_artifacts.pkl
+   - Pickled transformers (scalers, encoders)
+   - For applying same transformations to new data
+
+5. feature_engineering_report.txt
+   - This comprehensive report
+
+================================================================================
+6. RECOMMENDATIONS
+================================================================================
+
+1. Class Imbalance:
+   - Current class distribution is imbalanced (Low: 5077, 
+     Medium: 621, High: 687)
+   - Recommend using class weights or resampling techniques (SMOTE)
+   - Consider using balanced accuracy or F1-macro for evaluation
+
+2. Feature Selection:
+   - Top 30 features selected based on Random Forest importance
+   - Consider using other methods (RFE, L1 regularization) for comparison
+   - Monitor for overfitting with reduced feature set
+
+3. Model Selection:
+   - Start with baseline models (Logistic Regression, Decision Tree)
+   - Try ensemble methods (Random Forest, XGBoost, LightGBM)
+   - Consider neural networks for complex patterns
+
+4. Validation Strategy:
+   - Use stratified k-fold cross-validation due to class imbalance
+   - Reserve holdout test set for final evaluation
+   - Monitor for overfitting on training data
+
+5. Interpretability:
+   - Use SHAP values or LIME for model explainability
+   - Generate feature importance plots
+   - Create partial dependence plots for key features
+
+================================================================================
+END OF FEATURE ENGINEERING REPORT
+================================================================================

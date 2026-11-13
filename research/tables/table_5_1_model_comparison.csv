@@ -1,2 +1,0 @@
-Model,Accuracy,Balanced accuracy,Macro-F1,CV balanced accuracy
-Logistic Regression,0.4432263116679718,0.3884746960491488,0.3251324554045596,0.3860691341948499

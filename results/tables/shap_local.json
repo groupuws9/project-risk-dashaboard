@@ -1,0 +1,102 @@
+{
+  "model": "logreg",
+  "class_explained": "High",
+  "base_value": 0.00436,
+  "example": {
+    "org_size_category": "7",
+    "org_size_category_3": "3",
+    "org_size_category_4": "4",
+    "sector": "2",
+    "sector_detailed": "6",
+    "multinational": "1",
+    "org_age_years": "2",
+    "workplace_age": " ",
+    "trading_status": "1",
+    "union_coverage_pct": "0.0",
+    "union_coverage_pct_6": "6",
+    "union_coverage_pct_7": "7",
+    "collective_bargaining": " ",
+    "bargaining_level_org": " ",
+    "bargaining_level_est": " ",
+    "formal_hr_strategy": "1",
+    "performance_appraisal_pct": "1",
+    "training_budget_exists": "1",
+    "job_security_policy": "1",
+    "jcc_exists": "2",
+    "jcc_frequency": "9",
+    "jcc_function": 2,
+    "jcc_union_chair": " ",
+    "information_sharing_score": "1",
+    "info_chain_exist": "1",
+    "newsletter_exists": "1",
+    "investment_plans_shared": "2",
+    "consultation_depth": " ",
+    "employee_voice_channels": "3",
+    "pct_part_time": 76,
+    "pct_part_time_12": 9,
+    "pct_female": 100,
+    "pct_temporary": " "
+  },
+  "contributions": [
+    {
+      "feature": "sector",
+      "shap": 0.32494,
+      "value": "2"
+    },
+    {
+      "feature": "job_security_policy",
+      "shap": -0.15685,
+      "value": "1"
+    },
+    {
+      "feature": "performance_appraisal_pct",
+      "shap": 0.13722,
+      "value": "1"
+    },
+    {
+      "feature": "factor_3",
+      "shap": -0.12287,
+      "value": "None"
+    },
+    {
+      "feature": "factor_4",
+      "shap": -0.11821,
+      "value": "None"
+    },
+    {
+      "feature": "union_coverage_pct_100.0",
+      "shap": -0.11159,
+      "value": "None"
+    },
+    {
+      "feature": "factor_1",
+      "shap": 0.10969,
+      "value": "None"
+    },
+    {
+      "feature": "pct_female_100",
+      "shap": -0.09901,
+      "value": "None"
+    },
+    {
+      "feature": "newsletter_exists",
+      "shap": 0.09633,
+      "value": "1"
+    },
+    {
+      "feature": "formal_hr_strategy",
+      "shap": 0.0949,
+      "value": "1"
+    },
+    {
+      "feature": "consultation_depth",
+      "shap": 0.08466,
+      "value": " "
+    },
+    {
+      "feature": "bargaining_level_org",
+      "shap": -0.08246,
+      "value": " "
+    }
+  ]
+}

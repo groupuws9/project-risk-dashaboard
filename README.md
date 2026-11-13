@@ -101,70 +101,66 @@ Exact versions from the executed environment (Table 4.1 of the dissertation);
 
 ```
 project-risk-dashboard/
-├── README.md                  # this file
-├── LICENSE                    # MIT (code)
-├── requirements.txt           # dependency ranges
+├── README.md
+├── LICENSE
+├── requirements.txt
 │
 ├── data/
-│   ├── wirsts10_july2014.tab/.csv   # raw WERS time-series main survey (NOT in git — UKDA EUL)
-│   ├── wirsts25_july2014.tab/.csv   # raw WERS panel file            (NOT in git — UKDA EUL)
+│   ├── raw/
+│   │   ├── wirsts10_july2014.tab
+│   │   └── wirsts25_july2014.tab
+│   │
 │   └── processed/
-│       ├── wers_operational_risk_merged.csv   # analysis-ready dataset (14,448 × 53)
-│       ├── wers_panel_features_engineered.csv # exploratory matrix
+│       ├── wers_operational_risk_merged.csv
+│       ├── wers_ml_model_dataset.csv
 │       ├── dataset_metadata.json
 │       └── processing_summary.txt
 │
-├── ml_pipeline/                 # numbered pipeline (run in order)
-│   ├── 01_build_dataset.py                # merge waves, clean turnover, build target
-│   ├── 02_exploratory_analysis.py    # EDA report
-│   ├── 03_feature_exploration.py     # EDA of leakage-safe predictors (RQ1)
-│   ├── 04_model_training.py          # 5 models + model_metadata.json
-│   ├── 05_imbalance_tuning.py       # SMOTE / SMOTE-ENN / tuned / stacked
-│   ├── 06_model_evaluation.py        # metrics, confusion matrices, ROC
-│   ├── 07_shap_explanation.py        # global + local SHAP artefacts
-│   ├── 08_factor_analysis.py         # HR-practice factor analysis
-│   ├── data_contract.py              # leakage-safe feature contract (single source of truth)
-│   ├── efa_tools.py                  # shared EFA fit/transform utilities
-│   └── research/
-│       ├── thesis_outputs.py         # thesis figures + tables
-│       ├── generate_conceptual_figures.py  # Chapter 2-3 conceptual diagrams
-│       ├── generate_fig_5_5.py       # SHAP global-importance figure (Fig 5.5)
-│       └── system_tests.py           # ST1-ST19 evidence
+├── ml_pipeline/
+│   ├── 01_build_dataset.py
+│   ├── 02_exploratory_analysis.py
+│   ├── 03_feature_exploration.py
+│   ├── 04_model_training.py
+│   ├── 05_imbalance_tuning.py
+│   ├── 06_model_evaluation.py
+│   ├── 07_shap_explanation.py
+│   ├── 08_factor_analysis.py
+│   ├── 09_export_model_dataset.py
+│   ├── data_contract.py
+│   └── efa_tools.py
 │
 ├── models/
-│   └── saved_models/                 # *.pkl produced locally (NOT in git)
-│       └── model_metadata.json       # best model, 33 features, metrics
+│   └── saved_models/
+│       ├── *.pkl
+│       └── model_metadata.json
 │
 ├── dashboard/
-│   ├── app.py                        # Flask app + REST API
-│   ├── validation.py                 # Pydantic schema & error codes
-│   ├── templates/index.html          # single-page frontend
+│   ├── app.py
+│   ├── validation.py
+│   ├── predictor.py
+│   │
+│   ├── templates/
+│   │   └── index.html
+│   │
 │   └── static/
-│       ├── css/style.css
-│       └── js/app.js                 # tabs, forms, Plotly charts, what-if
+│       ├── css/
+│       │   └── style.css
+│       └── js/
+│           └── app.js
 │
 ├── tests/
-│   ├── conftest.py                   # fixtures (client, valid payload)
-│   ├── test_api.py                   # endpoints, error codes, SHAP contract
-│   ├── test_validation.py            # schema edge cases
-│   ├── test_predictor.py             # inference wrapper
-│   ├── test_data_contract.py         # leakage & fold-safe cleaning regression tests
-│   └── test_categorical_missing_parity.py  # train/serve categorical parity
+│   ├── conftest.py
+│   ├── test_api.py
+│   ├── test_validation.py
+│   ├── test_predictor.py
+│   ├── test_data_contract.py
+│   └── test_categorical_missing_parity.py
 │
-├── notebooks/
-│   ├── 01_data_exploration.ipynb
-│   ├── 02_feature_analysis.ipynb
-│   └── 03_model_development.ipynb
-│
-└── research/                  # dissertation + chapter-mapped artefacts
-    ├── dissertation_report.md          # consolidated research report (Chapters 1-7 + Appendices A-F)
-    ├── README.md                       # chapter → artefact map (tables/figures/code)
-    ├── artefacts_index.md              # full artefact index
-    ├── important_code_blocks.md        # key code referenced by the report
-    ├── DATA_SOURCE_CONSOLIDATED_REPORT.md  # WERS data-source provenance
-    ├── system_test_report.md           # ST1-ST19 evidence
-    ├── figures/                        # 17 figures + 2 dashboard screenshots
-    └── tables/                         # 28 CSV tables + dataset_characteristics.json
+└── notebooks/
+    ├── 01_data_exploration.ipynb
+    ├── 02_feature_analysis.ipynb
+    └── 03_model_development.ipynb
+                      
 ```
 
 ---
@@ -433,16 +429,16 @@ The following table summarizes all model evaluations from the executed pipeline,
 
 | Model | CV Accuracy | CV Bal. Acc. | CV Macro-F1 | Test Acc. | Test Bal. Acc. | Test Macro-F1 | Test ROC-AUC |
 |-------|-------------|--------------|-------------|-----------|----------------|---------------|--------------|
-| Logistic Regression | 0.434 | 0.386 | 0.321 | 0.443 | 0.388 | 0.325 | 0.590 |
+| Logistic Regression | 0.434 | 0.386 | 0.321 | 0.442 | 0.385 | 0.323 | 0.590 |
 | Random Forest | 0.761 | 0.352 | 0.344 | - | - | - | - |
 | MLP | 0.681 | 0.366 | 0.366 | - | - | - | - |
 | XGBoost | 0.795 | 0.345 | 0.321 | - | - | - | - |
 | LightGBM | 0.728 | 0.369 | 0.372 | - | - | - | - |
-| logreg_smote | - | - | - | 0.442 | 0.384 | 0.323 | 0.582 |
-| logreg_smoteenn | - | - | - | 0.391 | 0.372 | 0.299 | 0.579 |
-| rf_smoteenn | - | - | - | 0.410 | 0.393 | 0.314 | 0.587 |
-| xgboost_tuned | - | - | - | 0.411 | 0.401 | 0.317 | 0.603 |
-| stacked_ensemble | - | - | - | 0.631 | 0.376 | 0.368 | 0.576 |
+| logreg_smote | - | - | - | 0.442 | 0.387 | 0.324 | 0.582 |
+| logreg_smoteenn | - | - | - | 0.392 | 0.377 | 0.301 | 0.578 |
+| rf_smoteenn | - | - | - | 0.423 | 0.421 | 0.330 | 0.594 |
+| xgboost_tuned | - | - | - | 0.358 | 0.410 | 0.296 | 0.596 |
+| stacked_ensemble | - | - | - | 0.642 | 0.376 | 0.370 | 0.585 |
 
 Only the selected model (`logreg`) and the imbalance variants are persisted as
 pipelines and therefore evaluated on the held-out test partition; the other
@@ -450,26 +446,26 @@ base models are compared by cross-validation only.
 
 **Best model selected using training cross-validated balanced accuracy:** Logistic Regression (CV balanced accuracy = 0.386)
 
-**Best imbalance-aware variant:** xgboost_tuned (test balanced accuracy = 0.401)
+**Best imbalance-aware variant:** rf_smoteenn (test balanced accuracy = 0.421)
 
 **Per-class results for logreg on held-out test (1,277 samples):**
 
 | Class | Precision | Recall | F1-Score | Support |
 |-------|-----------|--------|----------|---------|
 | Low | 0.87 | 0.47 | 0.61 | 1,016 |
-| Medium | 0.13 | 0.35 | 0.19 | 124 |
+| Medium | 0.12 | 0.35 | 0.18 | 124 |
 | High | 0.12 | 0.34 | 0.18 | 137 |
-| Macro avg | 0.37 | 0.39 | 0.33 | 1,277 |
+| Macro avg | 0.37 | 0.39 | 0.32 | 1,277 |
 
 **Top SHAP drivers (mean absolute SHAP value, logreg model):**
 
 | Feature | Mean \|SHAP\| |
 |-------|------|
-| sector | 0.4622 |
+| sector | 0.4607 |
 | information_sharing_score | 0.2267 |
-| pct_temporary | 0.1926 |
-| factor_4 | 0.1915 |
-| training_budget_exists | 0.1889 |
+| pct_temporary | 0.1906 |
+| factor_4 | 0.1906 |
+| union_coverage_pct_6 | 0.1869 |
 
 ---
 

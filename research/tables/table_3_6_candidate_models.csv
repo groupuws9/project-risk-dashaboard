@@ -1,6 +1,0 @@
-Model,Library,Configuration,Class Weighting,Parameters
-Logistic Regression,scikit-learn,LogisticRegression,Balanced,max_iter=2000, random_state=42
-Random Forest,scikit-learn,RandomForestClassifier,Balanced Subsample,n_estimators=150, min_samples_leaf=2, n_jobs=-1, random_state=42
-MLP (Neural Network),scikit-learn,MLPClassifier,None,hidden_layer_sizes=(64,32), activation=relu, max_iter=300, early_stopping=True, random_state=42
-XGBoost,xgboost,XGBClassifier,None,n_estimators=200, max_depth=5, learning_rate=0.08, subsample=0.8, colsample_bytree=0.8, reg_lambda=1.0, eval_metric=mlogloss, tree_method=hist, random_state=42
-LightGBM,lightgbm,LGBMClassifier,Balanced,n_estimators=200, num_leaves=63, learning_rate=0.08, subsample=0.8, colsample_bytree=0.8, verbose=-1, random_state=42

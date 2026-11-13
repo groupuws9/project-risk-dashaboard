@@ -1,4 +1,4 @@
-﻿﻿"""
+"""
 04_model_training.py — Train and validate operational-risk classifiers.
 
 Implements a leakage-safe, fold-safe machine-learning pipeline for

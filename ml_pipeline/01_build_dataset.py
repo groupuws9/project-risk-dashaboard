@@ -3,7 +3,7 @@
 Why this module exists
 ----------------------
 The project uses the UK Data Service *Workplace Employment Relations Study*
-time-series (UKDA 4511). Two tab extracts ship in ``data/``:
+time-series (UKDA 4511). Two tab extracts ship in ``data/raw/``:
 
 * ``wirsts10_july2014.tab`` — cross-sectional main survey, 6,635 rows over the
   three modern waves 1998 / 2004 / 2011 (authoritative for those waves).
@@ -63,13 +63,14 @@ import pandas as pd
 
 BASE = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE / "data"
+RAW_DIR = DATA_DIR / "raw"
 OUT_DIR = DATA_DIR / "processed"
 OUT_CSV = OUT_DIR / "wers_operational_risk_merged.csv"
 OUT_META = OUT_DIR / "dataset_metadata.json"
 OUT_SUMMARY = OUT_DIR / "processing_summary.txt"
 
-MAIN_FILE = DATA_DIR / "wirsts10_july2014.tab"      # 1998 / 2004 / 2011
-PANEL_FILE = DATA_DIR / "wirsts25_july2014.tab"     # 1980 .. 2011
+MAIN_FILE = RAW_DIR / "wirsts10_july2014.tab"       # 1998 / 2004 / 2011
+PANEL_FILE = RAW_DIR / "wirsts25_july2014.tab"      # 1980 .. 2011
 MODERN_WAVES = [1998, 2004, 2011]
 EARLY_WAVES = [1980, 1984, 1990, 1991]
 

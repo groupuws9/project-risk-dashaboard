@@ -157,15 +157,15 @@
   "test_size": 0.2,
   "random_state": 42,
   "all_test_balanced_accuracy": {
-    "logreg": 0.3884746960491488,
+    "logreg": 0.38545844001663676,
     "random_forest": NaN,
     "mlp": NaN,
     "xgboost": NaN,
     "lightgbm": NaN,
-    "logreg_smoteenn": 0.37229792281968993,
-    "rf_smoteenn": 0.3931300587662003,
-    "logreg_smote": 0.38443811194191735,
-    "xgboost_tuned": 0.4013680028576602,
-    "stacked_ensemble": 0.3755528837091738
+    "logreg_smoteenn": 0.3765809368601705,
+    "rf_smoteenn": 0.4212150370772761,
+    "logreg_smote": 0.3868712019662482,
+    "xgboost_tuned": 0.4098037861525845,
+    "stacked_ensemble": 0.3756809654738531
   }
 }

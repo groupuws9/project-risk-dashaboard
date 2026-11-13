@@ -1,0 +1,40 @@
+{
+  "target": "operational_risk_category",
+  "features": [
+    "job_security_policy",
+    "union_coverage_pct",
+    "performance_appraisal_pct",
+    "pct_female",
+    "pct_part_time",
+    "pct_temporary",
+    "org_age_years",
+    "consultation_depth",
+    "union_coverage_pct_6",
+    "sector_detailed",
+    "jcc_frequency",
+    "newsletter_exists",
+    "investment_plans_shared",
+    "org_size_category",
+    "training_budget_exists",
+    "sector",
+    "workplace_age",
+    "information_sharing_score",
+    "info_chain_exist",
+    "formal_hr_strategy",
+    "employee_voice_channels",
+    "multinational",
+    "collective_bargaining",
+    "bargaining_level_org",
+    "bargaining_level_est",
+    "trading_status",
+    "jcc_union_chair",
+    "jcc_exists",
+    "jcc_function"
+  ],
+  "id_columns": [
+    "year",
+    "weight"
+  ],
+  "n_features": 29,
+  "created_at": "2026-11-11 23:02:06"
+}
