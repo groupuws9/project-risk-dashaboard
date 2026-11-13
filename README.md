@@ -174,6 +174,27 @@ project-risk-dashaboard/
 
 ---
 
+## What is not committed (git-ignored)
+
+The paths below are deliberately **excluded** from version control — they are
+licence-restricted, too large, or regenerable. They are listed here so the
+on-disk layout is not mistaken for the contents of the repository. The files
+themselves are **not** included.
+
+| Ignored path | Why |
+|---|---|
+| `data/raw/*.tab`, `data/*.csv`, `data/processed/*.csv` | WERS/WIRS survey microdata — UK Data Service End User Licence; never redistributed |
+| `models/saved_models/*.pkl` | trained model pipelines (large binaries); regenerate with stage 04 |
+| `results/research/`, `results/figures/` | dissertation reports and generated figure images |
+| `run_logs/`, `*.log`, `_probe*.py`, `_run*.log`, `output.txt` | transient pipeline logs and throwaway probes |
+| `scripts/*_log.txt`, `scripts/*_err.txt` | script run logs |
+| `.venv/`, `venv/`, `__pycache__/`, `*.pyc` | virtual environment and bytecode |
+| `.pytest_cache/`, `.ipynb_checkpoints/` | tool caches |
+| `.vscode/`, `.qodo/`, `.DS_Store` | IDE / OS metadata |
+| `flask_err*.txt`, `flask_log.txt` | local dev-server logs |
+
+---
+
 ## Installation
 
 A complete, beginner-friendly setup. Follow the steps **in order** — do not
