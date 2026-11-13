@@ -1,5 +1,11 @@
-*live local explanation per prediction** — exact linear SHAP computed
-  server-side for the exact input, aggregated back to the original features.
+# Predictive Modelling of Business Operational Risk Levels and an Interactive Web Dashboard
+
+Classification of workplace operational risk (Low / Medium / High) from the
+WERS/WIRS time-series (UK Data Service Study 4511, waves 1980–2011), served
+through a Flask REST API and an interactive web dashboard.
+
+**Live local explanation per prediction** — exact linear SHAP computed
+server-side for the exact input, aggregated back to the original features.
 
 ---
 
@@ -100,21 +106,16 @@ Exact versions from the executed environment (Table 4.1 of the dissertation);
 ## Project structure
 
 ```
-project-risk-dashboard/
+project-risk-dashaboard/
 ├── README.md
 ├── LICENSE
 ├── requirements.txt
 │
 ├── data/
-│   ├── raw/
-│   │   ├── wirsts10_july2014.tab
-│   │   └── wirsts25_july2014.tab
-│   │
-│   └── processed/
-│       ├── wers_operational_risk_merged.csv
-│       ├── wers_ml_model_dataset.csv
-│       ├── dataset_metadata.json
-│       └── processing_summary.txt
+│   ├── raw/                      # WERS .tab files — NOT in git (EUL)
+│   │   └── *.tab
+│   └── processed/                # pipeline outputs (dataset_metadata.json,
+│       └── ...                   #  processing_summary.txt tracked; *.csv local)
 │
 ├── ml_pipeline/
 │   ├── 01_build_dataset.py
@@ -130,18 +131,18 @@ project-risk-dashboard/
 │   └── efa_tools.py
 │
 ├── models/
+│   ├── risk_predictor.py
 │   └── saved_models/
-│       ├── *.pkl
-│       └── model_metadata.json
+│       ├── best_model_name.txt
+│       ├── factor_scoring.json
+│       ├── model_metadata.json
+│       └── *.pkl                 # trained pipelines — NOT in git
 │
 ├── dashboard/
 │   ├── app.py
 │   ├── validation.py
-│   ├── predictor.py
-│   │
 │   ├── templates/
 │   │   └── index.html
-│   │
 │   └── static/
 │       ├── css/
 │       │   └── style.css
@@ -150,17 +151,25 @@ project-risk-dashboard/
 │
 ├── tests/
 │   ├── conftest.py
+│   ├── system_tests.py           # ST1–ST19 system verification
 │   ├── test_api.py
 │   ├── test_validation.py
 │   ├── test_predictor.py
 │   ├── test_data_contract.py
 │   └── test_categorical_missing_parity.py
 │
+├── results/
+│   ├── tables/                   # metrics, confusion matrices, importance
+│   ├── features/                 # EFA + feature-engineering artefacts
+│   ├── evaluation_reports/
+│   ├── correlation_matrix.csv
+│   ├── eda_report.txt
+│   └── summary_statistics.csv
+│
 └── notebooks/
     ├── 01_data_exploration.ipynb
     ├── 02_feature_analysis.ipynb
     └── 03_model_development.ipynb
-                      
 ```
 
 ---
@@ -259,8 +268,8 @@ python ml_pipeline/05_imbalance_tuning.py          # SMOTE / SMOTE-ENN / tuned /
 python ml_pipeline/06_model_evaluation.py          # metrics, CM, ROC
 python ml_pipeline/07_shap_explanation.py          # global + local SHAP
 python ml_pipeline/08_factor_analysis.py           # EFA (spec §3.7) — adds factor scores
-python ml_pipeline/research/thesis_outputs.py      # thesis figures + tables
-python ml_pipeline/research/system_tests.py        # ST1-ST19 evidence
+python ml_pipeline/09_export_model_dataset.py      # export the final modelled dataset
+python tests/system_tests.py                       # ST1–ST19 system verification
 ```
 
 ### Launch the dashboard
@@ -351,12 +360,6 @@ curl -X POST http://localhost:5000/api/whatif \
 # -> {"baseline": {...}, "scenario": {...}} — same contract as /api/predict
 ```
 
-### Screenshots
-
-| Risk prediction + live local SHAP | What-if simulator |
-|---|---|
-| ![Local SHAP](research/figures/dashboard_predict_local_shap.png) | ![What-if](research/figures/dashboard_whatif_simulator.png) |
-
 ---
 
 ## Python usage example
@@ -400,7 +403,7 @@ The project maintains a **dual-test suite** ensuring code integrity, leakage con
 python -m pytest tests/ -q
 
 # Run system test evidence generator (ST1–ST19)
-python ml_pipeline/research/system_tests.py
+python tests/system_tests.py
 ```
 
 ### **Fold-Specific CV Verification (automated)**
@@ -424,7 +427,7 @@ and replayed by the inference wrapper.
 | Suite | Count | What it verifies |
 |---|---|---|
 | **Unit tests** (`pytest tests/ -q`) | **65 tests** | predictor wrapper, Pydantic validation contract, API endpoints, inference parity |
-| **System tests** (`python ml_pipeline/research/system_tests.py`) | **19 scenarios (ST1–ST19)** | data integrity, model loading, validation codes, resilience, integration |
+| **System tests** (`python tests/system_tests.py`) | **19 scenarios (ST1–ST19)** | data integrity, model loading, validation codes, resilience, integration |
 
 ### **Test Report Generation**
 
@@ -433,7 +436,7 @@ and replayed by the inference wrapper.
 python -m pytest tests/ -v --junitxml=results/test-report.xml
 
 # Generate system verification evidence
-python -m  ml_pipeline/research/system_tests.py
+python -m  tests/system_tests.py
 ```
 
 ### **Verification Results**
@@ -462,7 +465,7 @@ The automated suite produces machine-readable evidence:
 ## System verification
 
 Beyond unit tests, a 19-point system-test plan (ST1–ST19) is executed against
-the deployed configuration (`python ml_pipeline/research/system_tests.py`) —
+the deployed configuration (`python tests/system_tests.py`) —
 **19/19 passing** as of the latest run:
 
 | Group | Tests | Verifies |
@@ -526,15 +529,21 @@ base models are compared by cross-validation only.
 
 ## Research outputs
 
-Chapter-mapped dissertation artefacts (figures 2.1, 3.1–3.2, 4.1–4.6 and
-5.1–5.8, tables 3.2/4.x/5.1–5.17, environment table, system-test report) live
-in [`research/`](research/README.md) — its README is a full
-chapter → artifact map with the executed numbers. Regenerate everything
-deterministically with:
+All regenerable results are written to `results/`:
+
+| Path | Contents |
+|---|---|
+| `results/tables/` | model metrics, confusion matrices, permutation + SHAP importance |
+| `results/features/` | EFA factor scores/loadings and feature-engineering artefacts |
+| `results/evaluation_reports/` | formatted evaluation report (`evaluation_report.md`) |
+| `results/*.csv`, `results/*.txt` | correlation matrix, EDA report, summary statistics |
+
+Regenerate deterministically with the pipeline (steps 01–09 above) and produce
+the system-test evidence with:
 
 ```bash
-python ml_pipeline/research/thesis_outputs.py   # thesis figures + tables
-python ml_pipeline/research/system_tests.py     # ST1-ST19 evidence
+python ml_pipeline/01_build_dataset.py    # ... run stages 01 through 09 ...
+python tests/system_tests.py              # ST1–ST19 verification evidence
 ```
 
 ---
